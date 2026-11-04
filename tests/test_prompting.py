@@ -5,6 +5,7 @@ from src.ai.prompting.enrichment import (
     artifact_prompt,
     block_prompt,
     item_context,
+    target_language_instruction,
     tool_planning_prompt,
 )
 from src.models import (
@@ -20,6 +21,15 @@ from src.processing import ProfileRegistry
 PROFILES = ProfileRegistry.load(
     Path(__file__).resolve().parents[1] / "profiles", "tech-news"
 )
+
+
+def test_russian_target_language_asks_for_natural_russian_and_original_names():
+    instruction = target_language_instruction("ru")
+    prompt = artifact_prompt(PROFILES.get("tech-news"), "ru", PROFILES.get("tech-news").definition.enrichment.blocks)
+
+    assert instruction.startswith("Russian (language tag `ru`)")
+    assert "original Latin spelling" in instruction
+    assert f"Write the complete artifact in {instruction}." in prompt
 
 
 def test_tool_planning_excludes_profile_writing_policy():

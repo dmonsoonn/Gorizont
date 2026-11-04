@@ -20,6 +20,12 @@ GROUNDING_RULES = f"""- Treat the source item as the primary account of what hap
 def target_language_instruction(language: str) -> str:
     if language.lower() == "zh":
         return "Simplified Chinese (language tag `zh`)"
+    if language.lower() == "ru":
+        return (
+            "Russian (language tag `ru`). Write natural, idiomatic Russian rather than a literal translation. "
+            "Keep names of people, products, companies, libraries, and models in their original Latin spelling, "
+            "and keep established English technical terms when Russian has no common equivalent"
+        )
     return f"language `{language}`"
 
 
