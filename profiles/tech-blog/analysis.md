@@ -14,4 +14,4 @@ Evaluate whether a technology blog post rewards careful reading and gives techni
 
 Consider the clarity of the motivating problem, originality of the central insight, technical depth, quality of evidence, honesty about tradeoffs and limitations, practical specificity, and long-term usefulness. Distinguish measured results from vendor claims and author opinion. Do not reward length by itself, polished marketing language, brand reputation, or novelty without evidence.
 
-Use three to five specific topic tags.
+Use three to five specific topic tags written in Russian, for example `оптимизация инференса` rather than `inference optimization`. Only proper names of products, companies, libraries, and models keep their original spelling.

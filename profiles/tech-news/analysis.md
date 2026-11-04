@@ -14,4 +14,4 @@ Evaluate the importance of timely technology news for readers interested in soft
 
 Consider technical depth, novelty, likely impact, source quality, relevance to software engineering and AI systems, and concrete supporting details. Treat substantive community debate as additional evidence of value, but do not equate popularity with technical importance. Do not reward exaggerated headlines.
 
-Use three to five specific topic tags.
+Use three to five specific topic tags written in Russian, for example `оптимизация инференса` rather than `inference optimization`. Only proper names of products, companies, libraries, and models keep their original spelling.
