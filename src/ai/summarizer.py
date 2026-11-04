@@ -88,7 +88,32 @@ LABELS = {
             "3. 检查 AI 模型是否正常工作\n"
         ),
     },
+    "ru": {
+        "header": "Horizon: дайджест дня",
+        "source": "Источник",
+        "background": "Контекст",
+        "discussion": "Обсуждение",
+        "references": "Ссылки",
+        "tags": "Теги",
+        "selected_items": "Отобрано важных материалов: {selected} из {total}.",
+        "empty_analyzed": "Проанализировано материалов: {total}. Ни один не прошёл порог важности.",
+        "empty_body": (
+            "Сегодня важных новостей нет. Возможные причины:\n"
+            "- в отслеживаемых источниках был спокойный день\n"
+            "- порог оценки ИИ слишком высокий\n"
+            "- источников мало\n\n"
+            "Что можно сделать:\n"
+            "1. Понизить порог в настройках профиля\n"
+            "2. Добавить больше разных источников\n"
+            "3. Проверить, что ИИ-модель работает корректно\n"
+        ),
+    },
 }
+
+_RU_MONTHS = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
 
 
 @dataclass(frozen=True)
@@ -403,6 +428,11 @@ class DailySummarizer:
             if language == "zh":
                 source_parts.append(
                     f"{item.published_at.month}月{item.published_at.day}日 "
+                    f"{item.published_at:%H:%M}"
+                )
+            elif language == "ru":
+                source_parts.append(
+                    f"{item.published_at.day} {_RU_MONTHS[item.published_at.month - 1]}, "
                     f"{item.published_at:%H:%M}"
                 )
             else:

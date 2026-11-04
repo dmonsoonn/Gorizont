@@ -53,7 +53,7 @@ def _make_item(idx: int) -> ContentItem:
                         )
                     ],
                 )
-                for language in ("en", "zh")
+                for language in ("en", "zh", "ru")
             },
         ),
     )
@@ -367,6 +367,42 @@ def test_generate_empty_summary_zh_uses_localized_analyzed_line():
     )
 
     assert "> 已分析 10 条内容，但没有达到重要性阈值的条目。" in result
+    assert "Analyzed 10 items" not in result
+
+
+def test_generate_summary_ru_uses_localized_labels_profile_name_and_date():
+    summarizer = DailySummarizer(profile_names={"tech-news": {"ru": "Новости технологий"}})
+
+    result = _run_async(
+        summarizer.generate_summary(
+            [_make_item(1)],
+            date="2026-04-25",
+            total_fetched=10,
+            language="ru",
+        )
+    )
+
+    assert result.startswith("# Horizon: дайджест дня - 2026-04-25")
+    assert "> Отобрано важных материалов: 1 из 10." in result
+    assert "## Новости технологий" in result
+    assert "rss · tester · 25 апреля, 08:00" in result
+    assert "**Теги**: `#AI`, `#News`" in result
+    assert "Apr 25" not in result
+
+
+def test_generate_empty_summary_ru_uses_localized_analyzed_line():
+    summarizer = DailySummarizer()
+
+    result = _run_async(
+        summarizer.generate_summary(
+            [],
+            date="2026-04-25",
+            total_fetched=10,
+            language="ru",
+        )
+    )
+
+    assert "> Проанализировано материалов: 10. Ни один не прошёл порог важности." in result
     assert "Analyzed 10 items" not in result
 
 
