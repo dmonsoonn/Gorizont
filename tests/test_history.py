@@ -92,6 +92,22 @@ def test_bm25_prioritizes_specific_project_and_title(tmp_path):
     assert results[0]["url"] == "https://example.com/relevant"
 
 
+def test_russian_search_matches_inflected_words_and_tags(tmp_path):
+    (tmp_path / "horizon-2026-04-01-ru.md").write_text(
+        story(
+            "Обновление фреймворка для инференса",
+            "Новая версия сократила расход видеопамяти.",
+            extra="**Теги**: `#ускорение`",
+        ),
+        encoding="utf-8",
+    )
+    tool = HistorySearchTool(tmp_path)
+
+    assert len(search(tool, "обновления фреймворков")) == 1
+    assert len(search(tool, "ускорения")) == 1
+    assert search(tool, "робототехника") == []
+
+
 def test_version_numbers_do_not_match_unrelated_versions(tmp_path):
     (tmp_path / "horizon-2026-04-01.md").write_text(
         story("GPT-5.6 pricing", "GPT-5.6 prices changed.", "https://example.com/gpt")

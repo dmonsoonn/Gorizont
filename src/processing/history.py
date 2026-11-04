@@ -20,8 +20,9 @@ _ITEM = re.compile(
     r"^#{2,3} \[((?:\\.|[^\\\]])+)\]\((https?://\S+)\)[^\n]*\n",
     re.MULTILINE,
 )
-_TAGS = re.compile(r"^\*\*(?:Tags|标签)\*\*[:：]\s*(.*)$", re.MULTILINE)
-_WORDS = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*[+#]*|[\u3400-\u9fff]+")
+_TAGS = re.compile(r"^\*\*(?:Tags|标签|Теги)\*\*[:：]\s*(.*)$", re.MULTILINE)
+_WORDS = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*[+#]*|[\u3400-\u9fff]+|[а-яё]+")
+_CYRILLIC_STEM = 5
 _STOP_WORDS = set("a an and are as at be by for from in is it of on or the to was with".split())
 
 
@@ -36,6 +37,9 @@ def _tokenize(text: str) -> list[str]:
     for word in _WORDS.findall(text.casefold()):
         if "\u3400" <= word[0] <= "\u9fff" and len(word) > 1:
             terms.extend(word[index:index + 2] for index in range(len(word) - 1))
+        elif "а" <= word[0] <= "ё":
+            if len(word) > 2:
+                terms.append(word.replace("ё", "е")[:_CYRILLIC_STEM])
         elif word not in _STOP_WORDS:
             terms.append(word)
     return terms
