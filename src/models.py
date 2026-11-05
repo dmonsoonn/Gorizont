@@ -512,7 +512,7 @@ class WebhookConfig(BaseModel):
     headers: Optional[str] = None  # Custom headers, "Key: Value" per line
     delivery: Literal["summary", "summary_and_items"] = "summary"
     overview_position: Literal["first", "last"] = "first"
-    platform: Literal["generic", "feishu", "lark", "dingtalk", "slack", "discord"] = "generic"
+    platform: Literal["generic", "feishu", "lark", "dingtalk", "slack", "discord", "telegram"] = "generic"
     layout: Literal["markdown", "collapsible"] = "markdown"
     fallback_layout: Literal["markdown", "collapsible"] = (
         "markdown"  # Layout to use when the requested layout is unsupported

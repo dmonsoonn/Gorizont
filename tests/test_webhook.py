@@ -23,6 +23,7 @@ from src.models import (
 from src.services.webhook import (
     WebhookNotifier,
     WebhookDeliveryStatus,
+    _format_markdown_for_telegram,
     _format_markdown_for_webhook,
     _prepare_variables_for_body,
     _render,
@@ -1850,3 +1851,99 @@ class TestSkipConsoleOutput:
         assert mock_console.print.call_count >= 1
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "not set" in printed.lower() or "empty" in printed.lower()
+
+
+class TestTelegramPlatform:
+    def _notifier(self, **overrides):
+        config = WebhookConfig(
+            enabled=True,
+            url_env=_TEST_URL_ENV,
+            platform="telegram",
+            request_body={"chat_id": "@horizon", "text": "#{summary}", "parse_mode": "HTML"},
+            **overrides,
+        )
+        return WebhookNotifier(config)
+
+    def test_markdown_is_converted_to_telegram_html(self):
+        markdown = (
+            "# Horizon: дайджест дня - 2026-11-05\n\n"
+            "> Отобрано важных материалов: 1 из 10.\n\n"
+            "---\n\n"
+            "## [Tom &amp; Jerry \\(MoE\\) 5\\_6](https://example.com/a?x=1&y=2) ⭐️ 8.0/10\n\n"
+            "**Контекст.** Текст с \\[скобками\\] и 2\\*3 <b>\n\n"
+            "- [Doc & ref](https://example.com/doc)\n\n"
+            "**Теги**: `#AI`"
+        )
+
+        result = _format_markdown_for_telegram(markdown)
+
+        assert result == (
+            "<b>Horizon: дайджест дня - 2026-11-05</b>\n\n"
+            "<blockquote>Отобрано важных материалов: 1 из 10.</blockquote>\n\n"
+            '<b><a href="https://example.com/a?x=1&amp;y=2">Tom &amp; Jerry (MoE) 5_6</a> ⭐️ 8.0/10</b>\n\n'
+            "<b>Контекст.</b> Текст с [скобками] и 2*3 &lt;b&gt;\n\n"
+            '• <a href="https://example.com/doc">Doc &amp; ref</a>\n\n'
+            "<b>Теги</b>: <code>#AI</code>"
+        )
+
+    def test_request_body_uses_telegram_html_summary(self):
+        os.environ[_TEST_URL_ENV] = _TEST_URL
+        try:
+            notifier = self._notifier()
+            _, body, headers = notifier._render_request_components(
+                {"summary": "**Важно** [ссылка](https://example.com)"}
+            )
+        finally:
+            del os.environ[_TEST_URL_ENV]
+
+        assert headers["Content-Type"] == "application/json"
+        assert json.loads(body) == {
+            "chat_id": "@horizon",
+            "text": '<b>Важно</b> <a href="https://example.com">ссылка</a>',
+            "parse_mode": "HTML",
+        }
+
+    def test_long_summary_is_split_into_messages_within_limit(self):
+        paragraph = "Абзац " + "x" * 1500
+        messages = self._notifier(delivery="summary").build_daily_summary_messages(
+            summary="\n\n".join([paragraph] * 6),
+            important_items=[_make_item()],
+            all_items_count=10,
+            date="2026-11-05",
+            lang="ru",
+            summarizer=DailySummarizer(),
+        )
+
+        assert len(messages) == 3
+        assert all(len(message["summary"]) <= 4000 for message in messages)
+        assert all(message["message_kind"] == "summary" for message in messages)
+
+    def test_messages_are_spaced_to_respect_telegram_rate_limit(self, monkeypatch):
+        sleeps = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        monkeypatch.setattr("src.services.webhook.asyncio.sleep", fake_sleep)
+        notifier = self._notifier(delivery="summary_and_items")
+
+        with patch.object(notifier, "notify", new_callable=AsyncMock) as mock_notify:
+            _run_async(
+                notifier.send_daily_summary(
+                    summary="# Сводка",
+                    important_items=[_make_item(), _make_item(title="B", url="https://example.com/b")],
+                    all_items_count=10,
+                    date="2026-11-05",
+                    lang="ru",
+                    summarizer=DailySummarizer(),
+                )
+            )
+
+        assert mock_notify.call_count == 3
+        assert sleeps == [3.0, 3.0]
+
+    def test_redact_url_hides_telegram_bot_token(self):
+        assert (
+            redact_url("https://api.telegram.org/bot123:ABC-def/sendMessage")
+            == "https://api.telegram.org/bot<redacted>/sendMessage"
+        )
