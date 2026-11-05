@@ -674,7 +674,11 @@ def test_send_webhook_reports_delivery_failure_truthfully(
         service,
         "_build_context",
         lambda **kwargs: (
-            SimpleNamespace(config=SimpleNamespace(webhook=webhook_config)),
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    webhook=webhook_config, ai=SimpleNamespace(languages=["ru"])
+                )
+            ),
             [],
             [],
         ),
@@ -699,3 +703,16 @@ def test_send_webhook_reports_delivery_failure_truthfully(
     assert result["sent"] is False
     assert result["status"] == "platform_failure"
     assert result["status_code"] == 200
+    assert result["variables"]["language"] == "ru"
+
+
+def test_get_run_summary_defaults_to_generated_summary_language(tmp_path: Path) -> None:
+    service = HorizonPipelineService(runs_root=tmp_path / "mcp-runs")
+    service.run_store.create_run("run-ru")
+    service.run_store.save_summary("run-ru", "ru", "# Дайджест")
+    service.run_store.update_meta("run-ru", {"summary_language": "ru"})
+
+    result = service.get_run_summary("run-ru")
+
+    assert result["language"] == "ru"
+    assert result["summary"] == "# Дайджест"
