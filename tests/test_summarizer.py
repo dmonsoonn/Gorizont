@@ -406,6 +406,39 @@ def test_generate_empty_summary_ru_uses_localized_analyzed_line():
     assert "Analyzed 10 items" not in result
 
 
+def test_generate_summary_ru_renders_block_titles_without_cjk_brackets():
+    item = _make_item(1)
+    item.processing.artifacts["ru"].blocks.append(
+        ContentBlock(id="background", title="Контекст", content="Исходные ограничения.")
+    )
+
+    result = _run_async(
+        DailySummarizer().generate_summary(
+            [item],
+            date="2026-04-25",
+            total_fetched=1,
+            language="ru",
+        )
+    )
+
+    assert "**Контекст.** Исходные ограничения." in result
+    assert "「" not in result
+
+
+def test_generate_webhook_messages_ru_use_localized_overview_and_item_prefix():
+    summarizer = DailySummarizer()
+
+    overview = summarizer.generate_webhook_overview(
+        [_make_item(1)], date="2026-04-25", total_fetched=10, language="ru"
+    )
+    item = summarizer.generate_webhook_item(_make_item(1), language="ru", index=1, total=3)
+
+    assert overview.startswith("# Horizon: дайджест дня - 2026-04-25")
+    assert "> Отобрано важных материалов: 1 из 10." in overview
+    assert "Selected" not in overview
+    assert item.startswith("Материал 1 из 3")
+
+
 def test_generate_summary_escapes_untrusted_text_in_all_output_contexts():
     summarizer = DailySummarizer()
     item = _make_item(1)

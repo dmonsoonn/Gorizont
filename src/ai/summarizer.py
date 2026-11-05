@@ -247,7 +247,7 @@ class DailySummarizer:
             items: High-scoring content items (already enriched)
             date: Date string (YYYY-MM-DD)
             total_fetched: Total number of items fetched before filtering
-            language: Output language, either "en" or "zh"
+            language: Output language: "en", "zh" or "ru"
 
         Returns:
             str: Markdown formatted summary
@@ -316,6 +316,12 @@ class DailySummarizer:
                 f"> 从 {total_fetched} 条内容中筛选出 {len(items)} 条重要资讯。\n\n"
                 "下面会按内容逐条发送详情，你可以只看感兴趣的标题。\n\n"
             )
+        elif language == "ru":
+            header = (
+                f"# {labels['header']} - {date}\n\n"
+                f"> {labels['selected_items'].format(total=total_fetched, selected=len(items))}\n\n"
+                "Дальше материалы придут отдельными сообщениями, читайте только интересные темы.\n\n"
+            )
         else:
             header = (
                 f"# {labels['header']} - {date}\n\n"
@@ -356,7 +362,12 @@ class DailySummarizer:
     ) -> str:
         """Generate one item message for multi-message webhook delivery."""
         labels = LABELS.get(language, LABELS["en"])
-        prefix = f"第 {index}/{total} 条\n\n" if language == "zh" else f"Item {index}/{total}\n\n"
+        if language == "zh":
+            prefix = f"第 {index}/{total} 条\n\n"
+        elif language == "ru":
+            prefix = f"Материал {index} из {total}\n\n"
+        else:
+            prefix = f"Item {index}/{total}\n\n"
         return normalize_language(
             prefix
             + self._format_item(
@@ -467,7 +478,10 @@ class DailySummarizer:
                 if language == "zh":
                     block_title = _pangu(block_title)
                     block_content = _pangu(block_content)
-                lines.extend(["", f"**「{block_title}」** {block_content}"])
+                if language == "ru":
+                    lines.extend(["", f"**{block_title}.** {block_content}"])
+                else:
+                    lines.extend(["", f"**「{block_title}」** {block_content}"])
 
         sources = artifact.sources if artifact else []
         if sources:
