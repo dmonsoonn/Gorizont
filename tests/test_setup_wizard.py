@@ -275,3 +275,13 @@ def test_log_level_flag_is_forwarded_to_configure_logging(monkeypatch):
         wizard.main()
 
     assert logging_calls == ["DEBUG"]
+
+
+def test_local_presets_match_russian_interests():
+    from src.setup.presets import load_presets, match_sources
+
+    presets = load_presets(prefer_api=False)
+    matched = match_sources("безопасность и уязвимости", presets)
+    descriptions = [source["description"] for source, _score in matched]
+
+    assert any("Krebs on Security" in description for description in descriptions)

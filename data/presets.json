@@ -4,7 +4,7 @@
       "id": "ai-ml",
       "name": "AI / Machine Learning",
       "name_zh": "人工智能 / 机器学习",
-      "keywords": ["ai", "ml", "llm", "大模型", "机器学习", "deep learning", "深度学习", "neural network", "gpt", "transformer", "diffusion", "生成式", "nlp", "自然语言处理", "computer vision", "计算机视觉"],
+      "keywords": ["ai", "ml", "llm", "大模型", "机器学习", "deep learning", "深度学习", "neural network", "gpt", "transformer", "diffusion", "生成式", "nlp", "自然语言处理", "computer vision", "计算机视觉", "искусственн", "нейросет", "машинное обучение", "машинного обучения", "глубокое обучение", "языковые модели", "языковых моделей", "генеративн", "компьютерное зрение", "инференс"],
       "sources": [
         {
           "type": "reddit_subreddit",
@@ -61,7 +61,7 @@
       "id": "systems",
       "name": "Systems / Infrastructure",
       "name_zh": "系统 / 基础设施",
-      "keywords": ["linux", "kernel", "os", "操作系统", "内核", "container", "容器", "kubernetes", "k8s", "docker", "distributed", "分布式", "database", "数据库", "storage", "network", "网络", "performance", "性能"],
+      "keywords": ["linux", "kernel", "os", "操作系统", "内核", "container", "容器", "kubernetes", "k8s", "docker", "distributed", "分布式", "database", "数据库", "storage", "network", "网络", "performance", "性能", "линукс", "ядро", "ядра", "операционн", "контейнер", "распределённ", "распределенн", "базы данных", "баз данных", "хранилищ", "производительн", "инфраструктур"],
       "sources": [
         {
           "type": "rss",
@@ -97,7 +97,7 @@
       "id": "security",
       "name": "Security / Privacy",
       "name_zh": "安全 / 隐私",
-      "keywords": ["security", "安全", "vulnerability", "漏洞", "exploit", "cve", "privacy", "隐私", "cryptography", "密码学", "malware", "恶意软件", "pentest", "渗透测试", "reverse engineering", "逆向"],
+      "keywords": ["security", "安全", "vulnerability", "漏洞", "exploit", "cve", "privacy", "隐私", "cryptography", "密码学", "malware", "恶意软件", "pentest", "渗透测试", "reverse engineering", "逆向", "безопасност", "уязвимост", "эксплойт", "приватност", "конфиденциальн", "криптограф", "шифрован", "вредонос", "пентест", "реверс-инжиниринг", "обратная разработка"],
       "sources": [
         {
           "type": "reddit_subreddit",
@@ -126,7 +126,7 @@
       "id": "webdev",
       "name": "Web Development",
       "name_zh": "Web 开发",
-      "keywords": ["web", "frontend", "前端", "backend", "后端", "javascript", "typescript", "react", "vue", "node", "css", "html", "fullstack", "全栈", "api", "rest", "graphql"],
+      "keywords": ["web", "frontend", "前端", "backend", "后端", "javascript", "typescript", "react", "vue", "node", "css", "html", "fullstack", "全栈", "api", "rest", "graphql", "веб-разработ", "веб разработ", "фронтенд", "бэкенд", "бекенд", "фулстек", "вёрстк", "верстк"],
       "sources": [
         {
           "type": "reddit_subreddit",
@@ -155,7 +155,7 @@
       "id": "pl",
       "name": "Programming Languages / Compilers",
       "name_zh": "编程语言 / 编译器",
-      "keywords": ["programming language", "编程语言", "compiler", "编译器", "rust", "go", "zig", "haskell", "ocaml", "type system", "类型系统", "llvm", "wasm", "webassembly", "functional", "函数式"],
+      "keywords": ["programming language", "编程语言", "compiler", "编译器", "rust", "go", "zig", "haskell", "ocaml", "type system", "类型系统", "llvm", "wasm", "webassembly", "functional", "函数式", "язык программирования", "языки программирования", "языков программирования", "компилятор", "система типов", "систем типов", "функциональное программирование", "функционального программирования"],
       "sources": [
         {
           "type": "reddit_subreddit",
@@ -191,7 +191,7 @@
       "id": "embedded",
       "name": "Embedded / Robotics / Hardware",
       "name_zh": "嵌入式 / 机器人 / 硬件",
-      "keywords": ["embedded", "嵌入式", "robotics", "机器人", "iot", "物联网", "arduino", "raspberry pi", "rtos", "fpga", "risc-v", "hardware", "硬件", "具身智能", "embodied"],
+      "keywords": ["embedded", "嵌入式", "robotics", "机器人", "iot", "物联网", "arduino", "raspberry pi", "rtos", "fpga", "risc-v", "hardware", "硬件", "具身智能", "embodied", "встраиваем", "встроенн", "робототехник", "роботы", "роботов", "интернет вещей", "микроконтроллер", "железо", "аппаратн", "электроник"],
       "sources": [
         {
           "type": "reddit_subreddit",
@@ -220,7 +220,7 @@
       "id": "devtools",
       "name": "Open Source / DevTools",
       "name_zh": "开源 / 开发工具",
-      "keywords": ["open source", "开源", "devtools", "开发工具", "cli", "terminal", "终端", "editor", "编辑器", "vim", "neovim", "emacs", "vscode", "git", "ci/cd", "devops"],
+      "keywords": ["open source", "开源", "devtools", "开发工具", "cli", "terminal", "终端", "editor", "编辑器", "vim", "neovim", "emacs", "vscode", "git", "ci/cd", "devops", "открытый исходный код", "открытым исходным кодом", "опенсорс", "инструменты разработ", "инструментов разработ", "командная строка", "командной строк", "терминал", "редактор"],
       "sources": [
         {
           "type": "rss",
@@ -249,7 +249,7 @@
       "id": "science",
       "name": "Science / Research",
       "name_zh": "科学 / 学术研究",
-      "keywords": ["science", "科学", "research", "研究", "paper", "论文", "arxiv", "physics", "物理", "math", "数学", "biology", "生物", "chemistry", "化学", "neuroscience", "神经科学"],
+      "keywords": ["science", "科学", "research", "研究", "paper", "论文", "arxiv", "physics", "物理", "math", "数学", "biology", "生物", "chemistry", "化学", "neuroscience", "神经科学", "наука", "научн", "исследован", "физик", "математик", "биолог", "химия", "химии", "нейронаук"],
       "sources": [
         {
           "type": "reddit_subreddit",
