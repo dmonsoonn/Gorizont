@@ -177,6 +177,9 @@ h1, h2, h3, h4, h5, h6 {
 
 .lang-toggle button:last-child {
   border-radius: 0 3px 3px 0;
+}
+
+.lang-toggle button + button {
   border-left: none;
 }
 

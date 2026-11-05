@@ -28,7 +28,7 @@
       var text = p.textContent.trim();
 
       // Tag line: starts with Tags or 标签 (bold prefix rendered by Markdown)
-      if (/^(Tags|标签)\s*:/.test(text)) {
+      if (/^(Tags|标签|Теги)\s*:/.test(text)) {
         p.classList.add('tag-line');
         return;
       }
@@ -41,85 +41,72 @@
     });
   }
 
-  /** Set up EN/中文 language toggle as a page-level control */
   function setupLanguageToggle() {
-    // Create toggle buttons
+    var languages = [
+      { code: 'ru', label: 'RU' },
+      { code: 'zh', label: '中文' },
+      { code: 'en', label: 'EN' }
+    ];
+
     var toggle = document.createElement('div');
     toggle.className = 'lang-toggle';
 
-    var btnEn = document.createElement('button');
-    btnEn.textContent = 'EN';
-    btnEn.type = 'button';
+    var buttons = {};
+    var sections = {};
+    languages.forEach(function (language) {
+      var button = document.createElement('button');
+      button.textContent = language.label;
+      button.type = 'button';
+      toggle.appendChild(button);
+      buttons[language.code] = button;
+      sections[language.code] = document.getElementById('lang-' + language.code);
+    });
 
-    var btnZh = document.createElement('button');
-    btnZh.textContent = '中文';
-    btnZh.type = 'button';
-
-    toggle.appendChild(btnEn);
-    toggle.appendChild(btnZh);
-
-    // Insert at top of body
     document.body.insertBefore(toggle, document.body.firstChild);
 
-    // Read saved preference, default to zh
     var saved = null;
-    try { saved = localStorage.getItem('horizon-lang'); } catch (e) { /* noop */ }
-    var currentLang = saved === 'en' ? 'en' : 'zh';
+    try { saved = localStorage.getItem('horizon-lang'); } catch (e) {}
+    var currentLang = buttons[saved] ? saved : 'ru';
+    var isIndexPage = languages.some(function (language) { return sections[language.code]; });
 
     function updateButtons(lang) {
-      if (lang === 'en') {
-        btnEn.classList.add('active');
-        btnZh.classList.remove('active');
-      } else {
-        btnZh.classList.add('active');
-        btnEn.classList.remove('active');
-      }
+      languages.forEach(function (language) {
+        buttons[language.code].classList.toggle('active', language.code === lang);
+      });
     }
-
-    // Index page: toggle lang-section visibility
-    var zhSection = document.getElementById('lang-zh');
-    var enSection = document.getElementById('lang-en');
 
     function showSection(lang) {
-      if (!zhSection || !enSection) return;
-      if (lang === 'en') {
-        enSection.classList.remove('hidden');
-        zhSection.classList.add('hidden');
-      } else {
-        zhSection.classList.remove('hidden');
-        enSection.classList.add('hidden');
-      }
+      languages.forEach(function (language) {
+        var section = sections[language.code];
+        if (section) section.classList.toggle('hidden', language.code !== lang);
+      });
     }
 
-    // Article page: redirect to the other language version
     function switchArticleLang(lang) {
       var path = window.location.pathname;
-      var target = null;
-      if (lang === 'en' && /-zh(?:\.html)?$/.test(path.replace(/\/$/, ''))) {
-        target = path.replace(/-zh(\.html)?$/, '-en$1').replace(/-zh\/$/, '-en/');
-      } else if (lang === 'zh' && /-en(?:\.html)?$/.test(path.replace(/\/$/, ''))) {
-        target = path.replace(/-en(\.html)?$/, '-zh$1').replace(/-en\/$/, '-zh/');
-      }
-      if (target) window.location.href = target;
+      var suffix = /-(en|zh|ru)(\.html|\/)?$/;
+      var match = path.match(suffix);
+      if (!match || match[1] === lang) return;
+      window.location.href = path.replace(suffix, '-' + lang + (match[2] || ''));
     }
 
     function setLang(lang) {
       currentLang = lang;
       updateButtons(lang);
-      try { localStorage.setItem('horizon-lang', lang); } catch (e) { /* noop */ }
-      if (zhSection && enSection) {
+      try { localStorage.setItem('horizon-lang', lang); } catch (e) {}
+      if (isIndexPage) {
         showSection(lang);
       } else {
         switchArticleLang(lang);
       }
     }
 
-    btnEn.addEventListener('click', function () { setLang('en'); });
-    btnZh.addEventListener('click', function () { setLang('zh'); });
+    languages.forEach(function (language) {
+      buttons[language.code].addEventListener('click', function () { setLang(language.code); });
+    });
 
-    // Initialize
     updateButtons(currentLang);
-    if (zhSection && enSection) {
+    if (isIndexPage) {
       showSection(currentLang);
     }
   }
