@@ -180,12 +180,14 @@ class HorizonPipelineService:
             "truncated": len(items) > max_items,
         }
 
-    def get_run_summary(self, run_id: str, language: str = "zh") -> dict[str, Any]:
+    def get_run_summary(self, run_id: str, language: str | None = None) -> dict[str, Any]:
         """Read generated markdown summary for a run."""
 
         try:
+            if language is None:
+                language = self.run_store.load_meta(run_id)["summary_language"]
             markdown = self.run_store.load_summary(run_id, language)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, KeyError) as exc:
             raise HorizonMcpError(
                 code="HZ_SUMMARY_NOT_FOUND",
                 message=f"run_id={run_id} is missing summary for language={language}.",
@@ -541,7 +543,7 @@ class HorizonPipelineService:
     async def generate_summary(
         self,
         run_id: str,
-        language: str = "zh",
+        language: str | None = None,
         source_stage: str | None = None,
         horizon_path: str | None = None,
         config_path: str | None = None,
@@ -554,6 +556,7 @@ class HorizonPipelineService:
             horizon_path=horizon_path,
             config_path=config_path,
         )
+        language = language or ctx.config.ai.languages[0]
 
         total_fetched = self._total_fetched(run_id, fallback=len(items))
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -785,7 +788,7 @@ class HorizonPipelineService:
     async def send_webhook(
         self,
         date: str,
-        language: str = "zh",
+        language: str | None = None,
         important_items: int = 0,
         all_items: int = 0,
         result: str = "success",
@@ -800,6 +803,7 @@ class HorizonPipelineService:
             config_path=config_path,
             sources=None,
         )
+        language = language or ctx.config.ai.languages[0]
 
         webhook_config = ctx.config.webhook
         if not webhook_config:
