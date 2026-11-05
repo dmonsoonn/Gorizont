@@ -338,10 +338,15 @@ class HorizonOrchestrator:
                     dest_path = safe_output_path(posts_dir, post_filename)
 
                     # Add Jekyll front matter
+                    post_title = (
+                        f"Horizon: дайджест дня - {today}"
+                        if lang == "ru"
+                        else f"Horizon Summary: {today} ({lang.upper()})"
+                    )
                     front_matter = (
                         "---\n"
                         "layout: default\n"
-                        f"title: \"Horizon Summary: {today} ({lang.upper()})\"\n"
+                        f"title: \"{post_title}\"\n"
                         f"date: {today}\n"
                         f"lang: {lang}\n"
                         "---\n\n"
@@ -374,7 +379,11 @@ class HorizonOrchestrator:
                         f"{self.icons['email']} Sending {lang.upper()} email summary..."
                     )
                     subscribers = self.storage.load_subscribers()
-                    subject = f"Horizon Summary ({lang.upper()}) - {today}"
+                    subject = (
+                        f"Horizon: дайджест дня - {today}"
+                        if lang == "ru"
+                        else f"Horizon Summary ({lang.upper()}) - {today}"
+                    )
                     self.email_manager.send_daily_summary(summary, subject, subscribers)
 
                 # Send webhook notification if configured
