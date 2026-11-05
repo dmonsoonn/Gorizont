@@ -367,6 +367,19 @@ class WebhookNotifier:
                 "点击下方新闻面板即可在飞书内展开阅读全文。"
             )
 
+        if lang == "ru":
+            if item_count == 0:
+                return (
+                    f"# Horizon: дайджест дня - {date}\n\n"
+                    f"> Проанализировано материалов: {all_items_count}. "
+                    "Ни один не прошёл порог важности."
+                )
+            return (
+                f"# Horizon: дайджест дня - {date}\n\n"
+                f"> Отобрано важных материалов: {item_count} из {all_items_count}.\n\n"
+                "Разверните карточки ниже, чтобы прочитать материалы прямо в Feishu/Lark."
+            )
+
         if item_count == 0:
             return (
                 f"# Horizon Daily - {date}\n\n"
@@ -435,6 +448,8 @@ class WebhookNotifier:
                         "content": (
                             f"Horizon {date} 折叠日报"
                             if lang == "zh"
+                            else f"Horizon {date}: дайджест дня"
+                            if lang == "ru"
                             else f"Horizon {date} Collapsible Daily"
                         ),
                     },
@@ -485,6 +500,8 @@ class WebhookNotifier:
                     "message_title": (
                         f"Horizon {date} 折叠日报"
                         if lang == "zh"
+                        else f"Horizon {date}: дайджест дня"
+                        if lang == "ru"
                         else f"Horizon {date} Collapsible Daily"
                     ),
                     "message_kind": "collapsible",
@@ -518,6 +535,8 @@ class WebhookNotifier:
                 "message_title": (
                     f"Horizon {date} 总览"
                     if lang == "zh"
+                    else f"Horizon {date}: обзор"
+                    if lang == "ru"
                     else f"Horizon {date} Overview"
                 ),
                 "message_kind": "overview",
@@ -566,7 +585,11 @@ class WebhookNotifier:
             {
                 **base_vars,
                 "message_title": (
-                    f"Horizon {date} 日报" if lang == "zh" else f"Horizon {date} Daily"
+                    f"Horizon {date} 日报"
+                    if lang == "zh"
+                    else f"Horizon {date}: дайджест дня"
+                    if lang == "ru"
+                    else f"Horizon {date} Daily"
                 ),
                 "message_kind": "summary",
                 "summary": summary,
@@ -799,7 +822,7 @@ class WebhookNotifier:
             important_items: List of important content items
             all_items_count: Total number of items fetched
             date: Date string (YYYY-MM-DD)
-            lang: Language code ("en" or "zh")
+            lang: Language code ("en", "zh" or "ru")
             summarizer: DailySummarizer instance for generating webhook overviews
         """
         messages = self.build_daily_summary_messages(
