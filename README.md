@@ -329,7 +329,7 @@ Horizon can publish or deliver the generated briefing in several ways:
 |---------|--------------|
 | **GitHub Pages Daily Site** | Copies generated Markdown into `docs/` so GitHub Pages can publish a daily-updated briefing site |
 | **Email Subscription** | Sends the daily briefing to subscribers and handles subscribe/unsubscribe requests through SMTP/IMAP |
-| **Webhook Notification** | Pushes success or failure results to Feishu/Lark, DingTalk, Slack, Discord, or any custom webhook endpoint |
+| **Webhook Notification** | Pushes success or failure results to Feishu/Lark, DingTalk, Slack, Discord, Telegram, or any custom webhook endpoint |
 | **WeChat Notification** | Sends briefings through iLink Bot after QR login and a message from you; WeChat reply limits apply |
 
 For delivery setup, see the [Configuration Guide](docs/configuration.md). To run pipeline stages from an AI assistant, use the **MCP Server**: [tools](src/mcp/README.md) · [client setup](src/mcp/integration.md).
