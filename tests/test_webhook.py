@@ -849,7 +849,7 @@ def _make_item(title="Test Item", url="https://example.com/test", score=8.0):
                         )
                     ],
                 )
-                for language in ("en", "zh")
+                for language in ("en", "zh", "ru")
             },
         ),
     )
@@ -1272,6 +1272,44 @@ class TestSendDailySummary:
             overview_vars = mock_notify.call_args_list[0][0][0]
             assert overview_vars["message_title"] == "Horizon 2026-04-24 总览"
         del os.environ[_TEST_URL_ENV]
+
+    def test_ru_lang_localizes_titles_for_summary_overview_and_collapsible(self):
+        """Russian lang localizes message titles and the Feishu collapsible overview."""
+        summarizer = DailySummarizer()
+        items = [_make_item()]
+        build = dict(
+            summary="# Сводка",
+            important_items=items,
+            all_items_count=10,
+            date="2026-04-24",
+            lang="ru",
+            summarizer=summarizer,
+        )
+
+        summary_messages = WebhookNotifier(
+            WebhookConfig(enabled=True, url_env=_TEST_URL_ENV, delivery="summary")
+        ).build_daily_summary_messages(**build)
+        split_messages = WebhookNotifier(
+            WebhookConfig(enabled=True, url_env=_TEST_URL_ENV, delivery="summary_and_items")
+        ).build_daily_summary_messages(**build)
+        collapsible_messages = WebhookNotifier(
+            WebhookConfig(
+                enabled=True,
+                url_env=_TEST_URL_ENV,
+                delivery="summary_and_items",
+                platform="feishu",
+                layout="collapsible",
+            )
+        ).build_daily_summary_messages(**build)
+
+        assert summary_messages[0]["message_title"] == "Horizon 2026-04-24: дайджест дня"
+        assert split_messages[0]["message_title"] == "Horizon 2026-04-24: обзор"
+        assert collapsible_messages[0]["message_title"] == "Horizon 2026-04-24: дайджест дня"
+        card = collapsible_messages[0]["_request_body_override"]["card"]
+        assert card["header"]["title"]["content"] == "Horizon 2026-04-24: дайджест дня"
+        overview = card["body"]["elements"][0]["content"]
+        assert "Отобрано важных материалов: 1 из 10." in overview
+        assert "Expand the panels" not in overview
 
 # ── send_failure_notification ──
 
