@@ -27,7 +27,7 @@
 
 📡 Your own AI-powered news radar. Generates daily briefings in English & Chinese. | 构建你专属的 AI 新闻雷达
 
-[📖 Live Demo](https://thysrael.github.io/Horizon/) · [📋 Configuration Guide](https://thysrael.github.io/Horizon/configuration) · [💬 QQ Group](#community) · [简体中文](README_zh.md) · [日本語](README_ja.md)
+[📖 Live Demo](https://thysrael.github.io/Horizon/) · [📋 Configuration Guide](https://thysrael.github.io/Horizon/configuration) · [💬 QQ Group](#community) · [简体中文](README_zh.md) · [日本語](README_ja.md) · [Русский](README_ru.md)
 
 </div>
 
