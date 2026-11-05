@@ -270,6 +270,7 @@ def plan_chunks(text: str, limit: int, lang: str, remaining: int = CONTEXT_MESSA
     if chunks and remaining - len(chunks) <= 2:
         footer = "\n\n> " + (
             "回复任意消息，以补充微信推送额度。" if lang == "zh"
+            else "Ответьте боту любым сообщением, чтобы продлить лимит сообщений WeChat." if lang == "ru"
             else "Reply to the bot to renew the WeChat reply budget."
         )
         if len(footer) < limit:
