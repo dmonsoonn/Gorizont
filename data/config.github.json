@@ -175,36 +175,17 @@
   "webhook": {
     "enabled": true,
     "url_env": "HORIZON_WEBHOOK_URL",
+    "platform": "telegram",
     "delivery": "summary_and_items",
-    "overview_position": "last",
-    "platform": "feishu",
-    "layout": "collapsible",
-    "fallback_layout": "markdown",
-    "languages": [
-      "zh"
-    ],
+    "overview_position": "first",
+    "layout": "markdown",
+    "languages": null,
     "request_body": {
-      "msg_type": "interactive",
-      "card": {
-        "schema": "2.0",
-        "config": {
-          "wide_screen_mode": true
-        },
-        "header": {
-          "title": {
-            "tag": "plain_text",
-            "content": "#{message_title}"
-          },
-          "template": "blue"
-        },
-        "body": {
-          "elements": [
-            {
-              "tag": "markdown",
-              "content": "#{summary}"
-            }
-          ]
-        }
+      "chat_id": "${TELEGRAM_CHAT_ID}",
+      "text": "#{summary}",
+      "parse_mode": "HTML",
+      "link_preview_options": {
+        "is_disabled": true
       }
     },
     "headers": ""
