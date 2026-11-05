@@ -168,13 +168,18 @@ def test_chunking_prefers_paragraphs_then_splits_long_lines():
     assert split_text_chunks("   ", 10) == []
 
 
-@pytest.mark.parametrize("lang", ["zh", "en"])
+@pytest.mark.parametrize("lang", ["zh", "en", "ru"])
 @pytest.mark.parametrize("limit", [10, 120, 400])
 def test_budget_reminder_never_exceeds_the_configured_chunk_size(lang, limit):
     chunks = plan_chunks("a" * 1000, limit, lang, remaining=2)
     assert all(len(chunk) <= limit for chunk in chunks)
     if limit >= 120:
         assert "> " in chunks[1]  # Reminder arrives before the estimated budget is exhausted.
+
+
+def test_budget_reminder_is_localized_for_russian():
+    chunks = plan_chunks("a" * 1000, 400, "ru", remaining=2)
+    assert "Ответьте боту любым сообщением" in "".join(chunks)
 
 
 class FakeClient:

@@ -159,6 +159,8 @@ async def _run_test(config: WeChatConfig, storage: StorageManager, lang: str, dr
     sample = (
         "# Horizon 微信推送测试\n\n这是一条测试消息。\n\n[Horizon](https://github.com/Thysrael/Horizon)"
         if lang == "zh" else
+        "# Тест доставки Horizon в WeChat\n\nЭто тестовое сообщение.\n\n[Horizon](https://github.com/Thysrael/Horizon)"
+        if lang == "ru" else
         "# Horizon WeChat test\n\nThis is a test message.\n\n[Horizon](https://github.com/Thysrael/Horizon)"
     )
     if dry_run:
