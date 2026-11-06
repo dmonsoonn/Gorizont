@@ -17,18 +17,24 @@ import httpx
 from ..ai.markdown_utils import clean_app_summary_markdown
 from ..console_icons import get_icons
 from ..models import ContentItem, WebhookConfig
-from ..ai.summarizer import DailySummarizer
+from ..ai.summarizer import LABELS, DailySummarizer
 from ..url_security import UnsafeURLError, safe_request, validate_http_url
-from .wechat import split_text_chunks
 
 logger = logging.getLogger(__name__)
 
-TELEGRAM_MESSAGE_LIMIT = 4000
+TELEGRAM_RICH_MESSAGE_LIMIT = 32000
 TELEGRAM_SEND_INTERVAL = 3.0
 _TELEGRAM_BOT_PATH_RE = re.compile(r"/bot[^/]+")
-_TELEGRAM_INLINE_RE = re.compile(
-    r"\[((?:\\.|[^\\\]])+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|`([^`]+)`"
-)
+_TELEGRAM_EXPAND_HINT = {
+    "zh": "点击条目即可展开详情。",
+    "ru": "Нажмите на материал, чтобы раскрыть подробности.",
+    "en": "Tap an item to expand the details.",
+}
+_TELEGRAM_PART_LABEL = {
+    "zh": "第 {part}/{total} 部分",
+    "ru": "Часть {part} из {total}",
+    "en": "Part {part}/{total}",
+}
 
 
 class WebhookDeliveryStatus(str, Enum):
@@ -158,59 +164,22 @@ def _format_markdown_for_webhook(value: str) -> str:
     return clean_app_summary_markdown(value)
 
 
-def _telegram_text(value: str) -> str:
-    unescaped = re.sub(r"\\(.)", r"\1", value)
-    return html.escape(html.unescape(unescaped), quote=False)
-
-
-def _telegram_inline(value: str) -> str:
-    parts = []
-    position = 0
-    for match in _TELEGRAM_INLINE_RE.finditer(value):
-        parts.append(_telegram_text(value[position:match.start()]))
-        link_text, link_url, bold, code = match.groups()
-        if link_text is not None:
-            url = html.escape(html.unescape(link_url), quote=True)
-            parts.append(f'<a href="{url}">{_telegram_text(link_text)}</a>')
-        elif bold is not None:
-            parts.append(f"<b>{_telegram_inline(bold)}</b>")
-        else:
-            parts.append(f"<code>{_telegram_text(code)}</code>")
-        position = match.end()
-    parts.append(_telegram_text(value[position:]))
-    return "".join(parts)
-
-
-def _format_markdown_for_telegram(value: str) -> str:
-    lines = []
-    for line in clean_app_summary_markdown(value).split("\n"):
-        stripped = line.strip()
-        if re.fullmatch(r"-{3,}", stripped):
-            continue
-        heading = re.match(r"#{1,6}\s+(.*)", stripped)
-        if heading:
-            lines.append(f"<b>{_telegram_inline(heading.group(1))}</b>")
-        elif stripped.startswith("> "):
-            lines.append(f"<blockquote>{_telegram_inline(stripped[2:])}</blockquote>")
-        elif stripped.startswith("- "):
-            lines.append(f"• {_telegram_inline(stripped[2:])}")
-        else:
-            lines.append(_telegram_inline(line))
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+def _telegram_details(title: str, content: str) -> str:
+    return (
+        f"<details><summary>{html.escape(title, quote=False)}</summary>\n\n"
+        f"{content.strip()}\n\n</details>"
+    )
 
 
 def _prepare_variables_for_body(
     raw_body: Union[str, dict, list, None], variables: dict, platform: str = "generic"
 ) -> dict:
     """Apply webhook-safe variable formatting before body rendering."""
-    if raw_body is None or "summary" not in variables:
+    if raw_body is None or "summary" not in variables or platform == "telegram":
         return variables
 
     prepared = dict(variables)
-    if platform == "telegram":
-        prepared["summary"] = _format_markdown_for_telegram(str(variables["summary"]))
-    else:
-        prepared["summary"] = _format_markdown_for_webhook(str(variables["summary"]))
+    prepared["summary"] = _format_markdown_for_webhook(str(variables["summary"]))
     return prepared
 
 
@@ -518,6 +487,63 @@ class WebhookNotifier:
             },
         }
 
+    def _build_telegram_rich_parts(
+        self,
+        important_items: List[ContentItem],
+        all_items_count: int,
+        date: str,
+        lang: str,
+        summarizer: DailySummarizer,
+    ) -> List[str]:
+        labels = LABELS.get(lang, LABELS["en"])
+        header = f"# {labels['header']} - {date}\n\n"
+        if not important_items:
+            return [
+                header
+                + f"> {labels['empty_analyzed'].format(total=all_items_count)}\n\n"
+                + labels["empty_body"]
+            ]
+
+        parts = [
+            header
+            + f"> {labels['selected_items'].format(total=all_items_count, selected=len(important_items))}\n\n"
+            + _TELEGRAM_EXPAND_HINT.get(lang, _TELEGRAM_EXPAND_HINT["en"])
+        ]
+        part_group = None
+        for group in summarizer.build_view(important_items, lang).groups:
+            for view_item in group.items:
+                score_suffix = (
+                    f" ⭐️ {view_item.score}/10" if view_item.score != "?" else ""
+                )
+                block = _telegram_details(
+                    f"{view_item.index}. {view_item.title}{score_suffix}",
+                    clean_app_summary_markdown(
+                        summarizer.generate_detail_item(
+                            view_item.item,
+                            language=lang,
+                            index=view_item.index,
+                            title=view_item.title,
+                            score=view_item.score,
+                        )
+                    ),
+                )
+                with_heading = f"## {group.name}\n\n{block}"
+                addition = block if part_group == group.profile_id else with_heading
+                if len(parts[-1]) + len(addition) + 2 > TELEGRAM_RICH_MESSAGE_LIMIT:
+                    parts.append(with_heading)
+                else:
+                    parts[-1] += f"\n\n{addition}"
+                part_group = group.profile_id
+
+        if len(parts) == 1:
+            return parts
+        part_label = _TELEGRAM_PART_LABEL.get(lang, _TELEGRAM_PART_LABEL["en"])
+        return [parts[0]] + [
+            f"**{labels['header']} - {date}** · "
+            f"{part_label.format(part=number, total=len(parts))}\n\n{part}"
+            for number, part in enumerate(parts[1:], start=2)
+        ]
+
     def build_preview(self, variables: dict) -> dict[str, Any]:
         """Build the fully rendered request for dry-run preview."""
         request_url, body_content, headers = self._render_request_components(variables)
@@ -537,29 +563,6 @@ class WebhookNotifier:
         summarizer: DailySummarizer,
     ) -> List[dict[str, Any]]:
         """Build the variables for all webhook messages for one language."""
-        messages = self._build_messages(
-            summary, important_items, all_items_count, date, lang, summarizer
-        )
-        if (self.config.platform or "").lower() != "telegram":
-            return messages
-        return [
-            {**message, "summary": chunk}
-            for message in messages
-            for chunk in split_text_chunks(
-                clean_app_summary_markdown(str(message["summary"])),
-                TELEGRAM_MESSAGE_LIMIT,
-            )
-        ]
-
-    def _build_messages(
-        self,
-        summary: str,
-        important_items: List[ContentItem],
-        all_items_count: int,
-        date: str,
-        lang: str,
-        summarizer: DailySummarizer,
-    ) -> List[dict[str, Any]]:
         webhook_languages = getattr(self.config, "languages", None)
         if webhook_languages and lang not in webhook_languages:
             return []
@@ -599,6 +602,26 @@ class WebhookNotifier:
                         summarizer=summarizer,
                     ),
                 }
+            ]
+
+        if (self.config.platform or "").lower() == "telegram":
+            parts = self._build_telegram_rich_parts(
+                important_items, all_items_count, date, lang, summarizer
+            )
+            return [
+                {
+                    **base_vars,
+                    "message_title": (
+                        f"Horizon {date} 日报"
+                        if lang == "zh"
+                        else f"Horizon {date}: дайджест дня"
+                        if lang == "ru"
+                        else f"Horizon {date} Daily"
+                    ),
+                    "message_kind": "summary",
+                    "summary": part,
+                }
+                for part in parts
             ]
 
         delivery = getattr(self.config, "delivery", "summary")

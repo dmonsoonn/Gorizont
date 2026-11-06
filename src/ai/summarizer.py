@@ -381,6 +381,29 @@ class DailySummarizer:
             language,
         )
 
+    def generate_detail_item(
+        self,
+        item: ContentItem,
+        language: str,
+        index: int,
+        *,
+        title: Optional[str] = None,
+        score: float | str | None = None,
+    ) -> str:
+        labels = LABELS.get(language, LABELS["en"])
+        return normalize_language(
+            self._format_item(
+                item,
+                labels,
+                language,
+                index,
+                heading_level=3,
+                title_override=title,
+                score_override=score,
+            ).rstrip("-\n "),
+            language,
+        )
+
     def _format_item(
         self,
         item: ContentItem,

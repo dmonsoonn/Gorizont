@@ -23,7 +23,6 @@ from src.models import (
 from src.services.webhook import (
     WebhookNotifier,
     WebhookDeliveryStatus,
-    _format_markdown_for_telegram,
     _format_markdown_for_webhook,
     _prepare_variables_for_body,
     _render,
@@ -1859,64 +1858,85 @@ class TestTelegramPlatform:
             enabled=True,
             url_env=_TEST_URL_ENV,
             platform="telegram",
-            request_body={"chat_id": "@horizon", "text": "#{summary}", "parse_mode": "HTML"},
+            request_body={"chat_id": "@horizon", "rich_message": {"markdown": "#{summary}"}},
             **overrides,
         )
         return WebhookNotifier(config)
 
-    def test_markdown_is_converted_to_telegram_html(self):
-        markdown = (
-            "# Horizon: дайджест дня - 2026-11-05\n\n"
-            "> Отобрано важных материалов: 1 из 10.\n\n"
-            "---\n\n"
-            "## [Tom &amp; Jerry \\(MoE\\) 5\\_6](https://example.com/a?x=1&y=2) ⭐️ 8.0/10\n\n"
-            "**Контекст.** Текст с \\[скобками\\] и 2\\*3 <b>\n\n"
-            "- [Doc & ref](https://example.com/doc)\n\n"
-            "**Теги**: `#AI`"
-        )
-
-        result = _format_markdown_for_telegram(markdown)
-
-        assert result == (
-            "<b>Horizon: дайджест дня - 2026-11-05</b>\n\n"
-            "<blockquote>Отобрано важных материалов: 1 из 10.</blockquote>\n\n"
-            '<b><a href="https://example.com/a?x=1&amp;y=2">Tom &amp; Jerry (MoE) 5_6</a> ⭐️ 8.0/10</b>\n\n'
-            "<b>Контекст.</b> Текст с [скобками] и 2*3 &lt;b&gt;\n\n"
-            '• <a href="https://example.com/doc">Doc &amp; ref</a>\n\n'
-            "<b>Теги</b>: <code>#AI</code>"
-        )
-
-    def test_request_body_uses_telegram_html_summary(self):
-        os.environ[_TEST_URL_ENV] = _TEST_URL
-        try:
-            notifier = self._notifier()
-            _, body, headers = notifier._render_request_components(
-                {"summary": "**Важно** [ссылка](https://example.com)"}
-            )
-        finally:
-            del os.environ[_TEST_URL_ENV]
-
-        assert headers["Content-Type"] == "application/json"
-        assert json.loads(body) == {
-            "chat_id": "@horizon",
-            "text": '<b>Важно</b> <a href="https://example.com">ссылка</a>',
-            "parse_mode": "HTML",
-        }
-
-    def test_long_summary_is_split_into_messages_within_limit(self):
-        paragraph = "Абзац " + "x" * 1500
-        messages = self._notifier(delivery="summary").build_daily_summary_messages(
-            summary="\n\n".join([paragraph] * 6),
-            important_items=[_make_item()],
+    def _messages(self, items, **overrides):
+        return self._notifier(**overrides).build_daily_summary_messages(
+            summary="# Сводка",
+            important_items=items,
             all_items_count=10,
             date="2026-11-05",
             lang="ru",
             summarizer=DailySummarizer(),
         )
 
-        assert len(messages) == 3
-        assert all(len(message["summary"]) <= 4000 for message in messages)
-        assert all(message["message_kind"] == "summary" for message in messages)
+    def test_digest_is_one_rich_message_with_collapsed_items(self):
+        messages = self._messages(
+            [_make_item(title="Go & JSON"), _make_item(title="B", url="https://example.com/b", score=7.0)],
+            delivery="summary_and_items",
+        )
+
+        assert len(messages) == 1
+        summary = messages[0]["summary"]
+        assert summary.startswith(
+            "# Horizon: дайджест дня - 2026-11-05\n\n"
+            "> Отобрано важных материалов: 2 из 10.\n\n"
+            "Нажмите на материал, чтобы раскрыть подробности."
+        )
+        assert summary.count("## Tech News") == 1
+        assert "<details><summary>1. Go &amp; JSON ⭐️ 8.0/10</summary>" in summary
+        assert "<details><summary>2. B ⭐️ 7.0/10</summary>" in summary
+        assert "</summary>\n\n### [Go &amp; JSON](https://example.com/test) ⭐️ 8.0/10" in summary
+        assert "Материал" not in summary
+        assert "<a id=" not in summary
+        assert summary.count("</details>") == 2
+
+    def test_request_body_passes_markdown_unchanged(self):
+        os.environ[_TEST_URL_ENV] = _TEST_URL
+        try:
+            notifier = self._notifier()
+            summary = "<details><summary>1. A</summary>\n\n**Важно**\n\n</details>"
+            _, body, headers = notifier._render_request_components({"summary": summary})
+        finally:
+            del os.environ[_TEST_URL_ENV]
+
+        assert headers["Content-Type"] == "application/json"
+        assert json.loads(body) == {
+            "chat_id": "@horizon",
+            "rich_message": {"markdown": summary},
+        }
+
+    def test_long_digest_is_split_between_items(self, monkeypatch):
+        monkeypatch.setattr("src.services.webhook.TELEGRAM_RICH_MESSAGE_LIMIT", 1200)
+        items = [
+            _make_item(title=f"Item {index}", url=f"https://example.com/{index}")
+            for index in range(1, 7)
+        ]
+
+        messages = self._messages(items)
+
+        assert len(messages) > 1
+        assert all(len(message["summary"]) <= 1300 for message in messages)
+        assert all(
+            message["summary"].count("<details>") == message["summary"].count("</details>")
+            for message in messages
+        )
+        assert "".join(message["summary"] for message in messages).count("<details>") == 6
+        assert messages[1]["summary"].startswith(
+            f"**Horizon: дайджест дня - 2026-11-05** · Часть 2 из {len(messages)}\n\n## Tech News\n\n"
+        )
+
+    def test_empty_digest_sends_overview_only(self):
+        messages = self._messages([])
+
+        assert len(messages) == 1
+        assert messages[0]["summary"].startswith(
+            "# Horizon: дайджест дня - 2026-11-05\n\n"
+            "> Проанализировано материалов: 10. Ни один не прошёл порог важности."
+        )
 
     def test_messages_are_spaced_to_respect_telegram_rate_limit(self, monkeypatch):
         sleeps = []
@@ -1925,7 +1945,8 @@ class TestTelegramPlatform:
             sleeps.append(seconds)
 
         monkeypatch.setattr("src.services.webhook.asyncio.sleep", fake_sleep)
-        notifier = self._notifier(delivery="summary_and_items")
+        monkeypatch.setattr("src.services.webhook.TELEGRAM_RICH_MESSAGE_LIMIT", 1)
+        notifier = self._notifier()
 
         with patch.object(notifier, "notify", new_callable=AsyncMock) as mock_notify:
             _run_async(
