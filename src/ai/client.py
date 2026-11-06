@@ -620,10 +620,13 @@ class ChainedAIClient(AIClient):
         configs: List[AIConfig],
         clients: Optional[List[AIClient]] = None,
         client_factory: Optional[Any] = None,
+        sticky: bool = False,
     ):
         self.configs = configs
         self._client_factory = client_factory or _create_single_client
         self._client_cache: Dict[int, AIClient] = {}
+        self._sticky = sticky
+        self._start = 0
         # Allow tests to inject pre-built clients directly
         if clients is not None:
             for idx, client in enumerate(clients):
@@ -642,12 +645,14 @@ class ChainedAIClient(AIClient):
         max_tokens: Optional[int] = None,
     ) -> str:
         last_error: Optional[Exception] = None
-        for i in range(len(self.configs)):
+        for i in range(self._start, len(self.configs)):
             try:
                 client = self._get_client(i)
                 result = await client.complete(system, user, temperature, max_tokens)
                 if not result or not result.strip():
                     raise ValueError("Empty response from provider")
+                if self._sticky:
+                    self._start = i
                 return result
             except Exception as exc:
                 if not self._should_fallback(exc):
@@ -655,8 +660,9 @@ class ChainedAIClient(AIClient):
                 last_error = exc
                 if i < len(self.configs) - 1:
                     logger.warning(
-                        "Provider %s failed (%s), falling back to %s...",
-                        self.configs[i].provider.value, exc, self.configs[i + 1].provider.value,
+                        "Provider %s (%s) failed (%s), falling back to %s (%s)...",
+                        self.configs[i].provider.value, self.configs[i].api_key_env, exc,
+                        self.configs[i + 1].provider.value, self.configs[i + 1].api_key_env,
                     )
         raise RuntimeError(f"All providers failed. Last error: {last_error}")
 
@@ -726,6 +732,19 @@ def _create_chained_client(config: AIConfig) -> ChainedAIClient:
     return ChainedAIClient(chain_configs)
 
 
+def _create_key_chained_client(config: AIConfig) -> ChainedAIClient:
+    key_envs = [config.api_key_env] + [
+        env for env in config.fallback_api_key_envs if os.getenv(env)
+    ]
+    return ChainedAIClient(
+        [
+            config.model_copy(update={"api_key_env": env, "fallback_api_key_envs": []})
+            for env in key_envs
+        ],
+        sticky=True,
+    )
+
+
 def create_ai_client(config: AIConfig) -> AIClient:
     """Factory function to create appropriate AI client.
 
@@ -740,4 +759,6 @@ def create_ai_client(config: AIConfig) -> AIClient:
     """
     if config.provider_chain:
         return _create_chained_client(config)
+    if config.fallback_api_key_envs:
+        return _create_key_chained_client(config)
     return _create_single_client(config)

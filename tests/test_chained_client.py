@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.ai.client import ChainedAIClient, _create_chained_client
+from src.ai.client import ChainedAIClient, _create_chained_client, create_ai_client
 from src.models import AIConfig, AIProvider, AI_PROVIDER_DEFAULTS
 
 
@@ -141,6 +141,56 @@ def test_should_fallback_detects_retryable_errors():
     assert ChainedAIClient._should_fallback(Exception("503 service unavailable")) is True
     assert ChainedAIClient._should_fallback(Exception("Empty response from provider")) is True
     assert ChainedAIClient._should_fallback(Exception("some random error")) is False
+
+
+def test_sticky_chain_keeps_using_fallback_after_rate_limit():
+    cfg1 = _make_config(AIProvider.OPENAI, api_key_env="K1")
+    cfg2 = _make_config(AIProvider.OPENAI, api_key_env="K2")
+    client1 = _DummyClient(exc=Exception("429 rate limit exceeded"))
+    client2 = _DummyClient(result="ok")
+
+    chained = ChainedAIClient([cfg1, cfg2], clients=[client1, client2], sticky=True)
+    first = asyncio.run(chained.complete("sys", "usr"))
+    second = asyncio.run(chained.complete("sys", "usr"))
+
+    assert first == second == "ok"
+    assert len(client1.calls) == 1
+    assert len(client2.calls) == 2
+
+
+def test_non_sticky_chain_retries_first_provider_each_call():
+    cfg1 = _make_config(AIProvider.OPENAI)
+    cfg2 = _make_config(AIProvider.OLLAMA)
+    client1 = _DummyClient(exc=Exception("429 rate limit exceeded"))
+    client2 = _DummyClient(result="ok")
+
+    chained = ChainedAIClient([cfg1, cfg2], clients=[client1, client2])
+    asyncio.run(chained.complete("sys", "usr"))
+    asyncio.run(chained.complete("sys", "usr"))
+
+    assert len(client1.calls) == 2
+
+
+def test_fallback_api_key_envs_build_sticky_key_chain(monkeypatch):
+    monkeypatch.setenv("GROQ_KEY_2", "second")
+    monkeypatch.delenv("GROQ_KEY_3", raising=False)
+    config = AIConfig(
+        provider=AIProvider.OPENAI,
+        model="qwen",
+        base_url="https://api.groq.com/openai/v1",
+        api_key_env="GROQ_KEY_1",
+        fallback_api_key_envs=["GROQ_KEY_2", "GROQ_KEY_3"],
+        throttle_sec=12,
+    )
+
+    chained = create_ai_client(config)
+
+    assert isinstance(chained, ChainedAIClient)
+    assert chained._sticky is True
+    assert [cfg.api_key_env for cfg in chained.configs] == ["GROQ_KEY_1", "GROQ_KEY_2"]
+    assert all(cfg.base_url == "https://api.groq.com/openai/v1" for cfg in chained.configs)
+    assert all(cfg.model == "qwen" and cfg.throttle_sec == 12 for cfg in chained.configs)
+    assert all(cfg.fallback_api_key_envs == [] for cfg in chained.configs)
 
 
 def test_lazy_initialization():

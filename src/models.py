@@ -198,6 +198,7 @@ class AIConfig(BaseModel):
     model: str
     base_url: Optional[str] = None
     api_key_env: str
+    fallback_api_key_envs: List[str] = Field(default_factory=list)
     chatgpt_account: Optional[str] = None
     extra_body: Optional[Dict[str, Any]] = None
     temperature: float = 0.3
