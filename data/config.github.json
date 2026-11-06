@@ -4,6 +4,10 @@
     "model": "qwen/qwen3.8-27b",
     "base_url": "https://api.groq.com/openai/v1",
     "api_key_env": "GROQ_API_KEY",
+    "fallback_api_key_envs": [
+      "GROQ_API_KEY_2",
+      "GROQ_API_KEY_3"
+    ],
     "temperature": 0.3,
     "max_tokens": 8192,
     "throttle_sec": 12,
