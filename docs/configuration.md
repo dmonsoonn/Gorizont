@@ -127,6 +127,27 @@ OPENAI_API_KEY=sk-your-key
 GOOGLE_API_KEY=your-gemini-key
 ```
 
+To keep running when one key hits its rate limit or quota, list more
+environment variables in `fallback_api_key_envs`. Horizon starts with
+`api_key_env` and, after a 429, quota or 503 error, switches to the next key
+with the same provider, model and `base_url`, staying on it for the rest of
+the run. Variables that are not set are skipped. The list is ignored when
+`provider_chain` is set.
+
+```json
+{
+  "ai": {
+    "provider": "openai",
+    "base_url": "https://api.groq.com/openai/v1",
+    "api_key_env": "GROQ_API_KEY",
+    "fallback_api_key_envs": ["GROQ_API_KEY_2", "GROQ_API_KEY_3"]
+  }
+}
+```
+
+Some providers, Groq among them, apply rate limits per organization rather
+than per key, so extra keys only help when they belong to different accounts.
+
 When Horizon starts, environment variables have priority because
 the active config file does not store the secret. For local VS Code runs, create
 `.env` in the repository root and launch Horizon from that same root directory.
