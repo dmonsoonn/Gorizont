@@ -849,7 +849,7 @@ Webhook notification is optional and disabled unless `webhook.enabled` is `true`
 - `url_env`: Environment variable that contains the webhook URL. For example, set `HORIZON_WEBHOOK_URL=https://...` in `.env`.
 - `delivery`: Controls how messages are sent. Use `summary` for one full message, or `summary_and_items` for one overview message followed by one message per selected item.
 - `overview_position`: Controls where the overview is sent in `summary_and_items` mode. Use `first` for the traditional order, or `last` to send item details in reverse and keep the overview as the newest chat message.
-- `platform`: Optional webhook platform hint. Use `generic` by default, `feishu` / `lark` to enable platform-specific card rendering, or `telegram` to send Telegram HTML messages.
+- `platform`: Optional webhook platform hint. Use `generic` by default, `feishu` / `lark` to enable platform-specific card rendering, or `telegram` to send Telegram rich messages.
 - `layout`: Controls the message layout. Use `markdown` for templated Markdown delivery, or `collapsible` with `platform: "feishu"` / `"lark"` for a single Feishu Card JSON 2.0 message with each item in a collapsed panel.
 - `fallback_layout`: Reserved fallback layout for unsupported platform/layout combinations. The current safe fallback is `markdown`.
 - `languages`: Optional webhook-only language filter. Use `["zh"]` or `["en"]` to send only selected languages; use `null` or omit it to send all configured `ai.languages`.
@@ -932,10 +932,10 @@ Use `#{key?limit=N&split=DELIM}` to truncate long values by splitting on `DELIM`
 
 ### Telegram
 
-Create a bot with [@BotFather](https://t.me/BotFather), add it to your channel or group as an administrator that can post messages, and set the webhook URL to the Bot API `sendMessage` method:
+Create a bot with [@BotFather](https://t.me/BotFather), add it to your channel or group as an administrator that can post messages, and set the webhook URL to the Bot API `sendRichMessage` method:
 
 ```bash
-HORIZON_WEBHOOK_URL=https://api.telegram.org/bot<TOKEN>/sendMessage
+HORIZON_WEBHOOK_URL=https://api.telegram.org/bot<TOKEN>/sendRichMessage
 TELEGRAM_CHAT_ID=@your_channel
 ```
 
@@ -947,19 +947,15 @@ Use `@channel_username` for a public channel, or the numeric `-100...` chat ID f
     "enabled": true,
     "url_env": "HORIZON_WEBHOOK_URL",
     "platform": "telegram",
-    "delivery": "summary_and_items",
-    "overview_position": "first",
     "request_body": {
       "chat_id": "${TELEGRAM_CHAT_ID}",
-      "text": "#{summary}",
-      "parse_mode": "HTML",
-      "link_preview_options": {"is_disabled": true}
+      "rich_message": {"markdown": "#{summary}"}
     }
   }
 }
 ```
 
-With `platform: "telegram"`, Horizon converts `#{summary}` from Markdown into the HTML subset that Telegram accepts, splits messages longer than 4000 characters, and waits 3 seconds between messages to stay within Telegram's per-chat rate limit. Log output masks the bot token in the URL.
+With `platform: "telegram"`, Horizon sends the digest as a [rich message](https://core.telegram.org/bots/api/rich-messages): an overview followed by profile sections, with each item collapsed into an expandable block that holds its full summary and links. `delivery` and `layout` are ignored. A digest longer than the rich message limit is split between items into numbered parts, sent 3 seconds apart to stay within Telegram's per-chat rate limit. Log output masks the bot token in the URL.
 
 ### DingTalk
 
