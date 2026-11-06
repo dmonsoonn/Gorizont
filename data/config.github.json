@@ -176,16 +176,11 @@
     "enabled": true,
     "url_env": "HORIZON_WEBHOOK_URL",
     "platform": "telegram",
-    "delivery": "summary_and_items",
-    "overview_position": "first",
-    "layout": "markdown",
     "languages": null,
     "request_body": {
       "chat_id": "${TELEGRAM_CHAT_ID}",
-      "text": "#{summary}",
-      "parse_mode": "HTML",
-      "link_preview_options": {
-        "is_disabled": true
+      "rich_message": {
+        "markdown": "#{summary}"
       }
     },
     "headers": ""
