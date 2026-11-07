@@ -98,6 +98,29 @@ def test_overlay_requires_json_webhook():
         apply_overlay(Config.model_validate(data), UserConfig(id=111))
 
 
+def test_load_user_rejects_empty_chat_id(tmp_path):
+    write_user(tmp_path, "111", {"id": 111, "chat_id": ""})
+
+    with pytest.raises(ConfigError, match="chat_id"):
+        load_user(tmp_path, "111")
+
+
+def test_overlay_rejects_unexpanded_chat_id(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}"})
+    user = load_user(tmp_path, "111")
+
+    with pytest.raises(ConfigError, match="TELEGRAM_CHAT_ID"):
+        apply_overlay(base_config(), user)
+
+
+def test_due_users_does_not_need_chat_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}", "publish_site": True})
+
+    assert due_users(tmp_path, 0) == [{"user": "111", "publish_site": True}]
+
+
 @pytest.mark.parametrize("user_id", ["abc", "../config", "0", "-1", "12/34", ""])
 def test_load_user_rejects_invalid_ids(tmp_path, user_id):
     with pytest.raises(ConfigError, match="Invalid user id"):

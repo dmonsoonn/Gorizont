@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ..models import Config, SourcesConfig
-from ..storage.manager import ConfigError, _expand_env_vars
+from ..storage.manager import _ENV_VAR_PATTERN, ConfigError, _expand_env_vars
 
 _USER_ID_PATTERN = re.compile(r"[1-9][0-9]*")
 
@@ -25,6 +25,13 @@ class UserConfig(BaseModel):
     def _divides_day(cls, value: int) -> int:
         if value <= 0 or 24 % value:
             raise ValueError("time_window_hours must be a positive divisor of 24")
+        return value
+
+    @field_validator("chat_id")
+    @classmethod
+    def _non_empty_chat(cls, value: Optional[Union[int, str]]) -> Optional[Union[int, str]]:
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("chat_id must not be empty")
         return value
 
 
@@ -60,7 +67,10 @@ def apply_overlay(base: Config, user: UserConfig) -> Config:
     if user.sources is not None:
         data["sources"] = user.sources.model_dump(mode="json")
     data["collection"]["time_window_hours"] = user.time_window_hours
-    data["webhook"]["request_body"]["chat_id"] = user.id if user.chat_id is None else user.chat_id
+    chat_id = user.id if user.chat_id is None else user.chat_id
+    if isinstance(chat_id, str) and _ENV_VAR_PATTERN.search(chat_id):
+        raise ConfigError(f"chat_id {chat_id} of user {user.id} is not expanded: set the environment variable")
+    data["webhook"]["request_body"]["chat_id"] = chat_id
     if not user.publish_site:
         data["email"] = None
     return Config.model_validate(data)
