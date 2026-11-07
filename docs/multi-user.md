@@ -13,10 +13,9 @@ Every user has a file `data/users/<telegram_id>.json`:
 
 ```json
 {
-  "id": 612722019,
-  "chat_id": "${TELEGRAM_CHAT_ID}",
-  "time_window_hours": 1,
-  "publish_site": true,
+  "id": 111111111,
+  "chat_id": "@my_channel",
+  "time_window_hours": 6,
   "sources": { "rss": [{ "name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/" }] }
 }
 ```
@@ -27,7 +26,7 @@ Every user has a file `data/users/<telegram_id>.json`:
 | `chat_id` | `id` | Where the digest goes: the user's private chat with the bot, a channel (`@name`) or a group. The bot must be an admin of a channel to post there. |
 | `time_window_hours` | `1` | Collection window and digest frequency. Must divide 24: the user runs at UTC hours divisible by it. |
 | `publish_site` | `false` | Publish the digest to GitHub Pages and send email. Only the site owner should set it. |
-| `sources` | base sources | Replaces the whole `sources` block of the base config. |
+| `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. Inside a user's `sources`, missing source types take the model defaults, and Hacker News is on by default: set `"hackernews": {"enabled": false}` to keep it off. |
 
 `${VAR}` references are expanded from the environment only in the owner's file: the one whose `id` equals the `HORIZON_OWNER_ID` environment variable. Any `${VAR}` in another user's file is a validation error, so a user file cannot read secrets such as AI keys. `users-digest.yml` sets `HORIZON_OWNER_ID` in both jobs; for local runs export it or add it to your dotenv file.
 
@@ -46,7 +45,7 @@ uv run python -m src.users due --hour 12
 
 `.github/workflows/users-digest.yml` runs hourly. The `plan` job lists due users, and the `digest` job runs them one at a time (`max-parallel: 1`) so they share the AI keys without hitting rate limits. A failed user does not stop the others (`fail-fast: false`) and gets a failure message in their own chat. A user file that fails validation is still scheduled, so its job fails visibly with the error. GitHub Pages is deployed only for users with `publish_site: true`.
 
-`daily-summary.yml` is kept for manual runs of the base config only.
+`daily-summary.yml` is kept from upstream for manual runs of the base config only; since the base config has no sources, such a run collects nothing.
 
 ## Adding a user
 
