@@ -36,130 +36,8 @@
     }
   },
   "sources": {
-    "github": [
-      {
-        "type": "user_events",
-        "username": "karpathy",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "vllm-project",
-        "repo": "vllm",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "sgl-project",
-        "repo": "sglang",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "triton-lang",
-        "repo": "triton",
-        "enabled": true,
-        "profile": "tech-news"
-      }
-    ],
     "hackernews": {
-      "enabled": true,
-      "fetch_top_stories": 30,
-      "min_score": 150,
-      "profile": "tech-news"
-    },
-    "rss": [
-      {
-        "name": "Simon Willison",
-        "url": "https://simonwillison.net/atom/everything/",
-        "enabled": true,
-        "category": "ai-tools",
-        "profile": "tech-news"
-      },
-      {
-        "name": "vLLM Blog",
-        "url": "https://vllm.ai/blog/rss.xml",
-        "enabled": true,
-        "category": "llm-inference",
-        "profile": "tech-blog",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "Sean Goedecke",
-        "url": "https://www.seangoedecke.com/rss.xml",
-        "enabled": true,
-        "category": "software-engineering",
-        "profile": "tech-blog",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "CNBC Finance",
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-        "enabled": true,
-        "category": "finance",
-        "profile": "finance-news",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "GitHub Trending - Daily",
-        "url": "https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml",
-        "enabled": true,
-        "category": "github-trending",
-        "profile": "tech-news"
-      },
-      {
-        "name": "Semianalysis",
-        "url": "https://newsletter.semianalysis.com/feed",
-        "enabled": true,
-        "category": "semiconductors",
-        "profile": "tech-news"
-      },
-      {
-        "name": "LWN.net",
-        "url": "https://lwn.net/headlines/full_text?key=${LWN_KEY}",
-        "enabled": true,
-        "category": "linux-kernel",
-        "profile": "tech-news"
-      }
-    ],
-    "reddit": {
-      "enabled": true,
-      "subreddits": [
-        {
-          "subreddit": "MachineLearning",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60,
-          "profile": "tech-news"
-        },
-        {
-          "subreddit": "LocalLLaMA",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60,
-          "profile": "tech-news"
-        }
-      ],
-      "users": [],
-      "fetch_comments": 10
-    },
-    "telegram": {
-      "enabled": true,
-      "channels": [
-        {
-          "channel": "zaihuapd",
-          "enabled": false,
-          "fetch_limit": 20,
-          "profile": ["tech-news", "finance-news"]
-        }
-      ]
+      "enabled": false
     }
   },
   "collection": {
@@ -186,7 +64,6 @@
       "rich_message": {
         "markdown": "#{summary}"
       }
-    },
-    "headers": ""
+    }
   }
 }
