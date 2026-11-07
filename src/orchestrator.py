@@ -186,6 +186,7 @@ class HorizonOrchestrator:
         storage: StorageManager,
         console: Optional[Console] = None,
         profiles: Optional[ProfileRegistry] = None,
+        publish_site: bool = True,
     ):
         """Initialize orchestrator.
 
@@ -197,6 +198,7 @@ class HorizonOrchestrator:
         self.config = config
         self.storage = storage
         self.console = console or Console(stderr=True)
+        self.publish_site = publish_site
         self.icons = get_icons(config.display.icon_style)
         self.profiles = profiles or ProfileRegistry.load(
             Path(config.processing.profiles_dir), config.processing.default_profile
@@ -328,50 +330,51 @@ class HorizonOrchestrator:
                 )
 
                 # Copy to docs/ for GitHub Pages
-                try:
-                    from pathlib import Path
+                if self.publish_site:
+                    try:
+                        from pathlib import Path
 
-                    post_filename = f"{today}-summary-{lang}.md"
-                    posts_dir = Path("docs/_posts")
-                    posts_dir.mkdir(parents=True, exist_ok=True)
+                        post_filename = f"{today}-summary-{lang}.md"
+                        posts_dir = Path("docs/_posts")
+                        posts_dir.mkdir(parents=True, exist_ok=True)
 
-                    dest_path = safe_output_path(posts_dir, post_filename)
+                        dest_path = safe_output_path(posts_dir, post_filename)
 
-                    # Add Jekyll front matter
-                    post_title = (
-                        f"Horizon: дайджест дня - {today}"
-                        if lang == "ru"
-                        else f"Horizon Summary: {today} ({lang.upper()})"
-                    )
-                    front_matter = (
-                        "---\n"
-                        "layout: default\n"
-                        f"title: \"{post_title}\"\n"
-                        f"date: {today}\n"
-                        f"lang: {lang}\n"
-                        "---\n\n"
-                    )
+                        # Add Jekyll front matter
+                        post_title = (
+                            f"Horizon: дайджест дня - {today}"
+                            if lang == "ru"
+                            else f"Horizon Summary: {today} ({lang.upper()})"
+                        )
+                        front_matter = (
+                            "---\n"
+                            "layout: default\n"
+                            f"title: \"{post_title}\"\n"
+                            f"date: {today}\n"
+                            f"lang: {lang}\n"
+                            "---\n\n"
+                        )
 
-                    # Strip leading H1 header to avoid duplication with Jekyll title
-                    summary_content = summary
-                    first_line = summary_content.strip().split("\n")[0]
-                    if first_line.startswith("# "):
-                        parts = summary_content.split("\n", 1)
-                        if len(parts) > 1:
-                            summary_content = parts[1].strip()
+                        # Strip leading H1 header to avoid duplication with Jekyll title
+                        summary_content = summary
+                        first_line = summary_content.strip().split("\n")[0]
+                        if first_line.startswith("# "):
+                            parts = summary_content.split("\n", 1)
+                            if len(parts) > 1:
+                                summary_content = parts[1].strip()
 
-                    with open(dest_path, "w", encoding="utf-8") as f:
-                        f.write(front_matter + summary_content)
+                        with open(dest_path, "w", encoding="utf-8") as f:
+                            f.write(front_matter + summary_content)
 
-                    self.console.print(
-                        f"{self.icons['document']} Copied {lang.upper()} summary "
-                        f"to GitHub Pages: {dest_path}\n"
-                    )
-                except Exception as e:
-                    self.console.print(
-                        f"[yellow]{self.icons['warning']} Failed to copy "
-                        f"{lang.upper()} summary to docs/: {e}[/yellow]\n"
-                    )
+                        self.console.print(
+                            f"{self.icons['document']} Copied {lang.upper()} summary "
+                            f"to GitHub Pages: {dest_path}\n"
+                        )
+                    except Exception as e:
+                        self.console.print(
+                            f"[yellow]{self.icons['warning']} Failed to copy "
+                            f"{lang.upper()} summary to docs/: {e}[/yellow]\n"
+                        )
 
                 # Send email if configured
                 if self.email_manager and self.config.email and self.config.email.enabled:

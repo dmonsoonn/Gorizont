@@ -15,6 +15,7 @@ from .logging_config import configure_logging
 from .storage.manager import ConfigError, StorageManager
 from .orchestrator import HorizonOrchestrator
 from .models import AIProvider
+from .users import apply_overlay, load_user
 
 
 console = Console(stderr=True)
@@ -44,6 +45,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Horizon - AI-Driven Information Aggregation System")
     parser.add_argument("--hours", type=int, help="Force fetch from last N hours")
+    parser.add_argument("--user", metavar="TELEGRAM_ID", help="Run for one user from <data-dir>/users/<id>.json")
     add_data_dir_arguments(parser)
     add_log_level_argument(parser)
     args = parser.parse_args()
@@ -60,8 +62,12 @@ def main():
         storage = StorageManager(data_dir=str(data_dir), config_path=args.config)
 
         # Load configuration
+        user = None
         try:
             config = storage.load_config()
+            if args.user:
+                user = load_user(data_dir, args.user)
+                config = apply_overlay(config, user)
         except FileNotFoundError:
             console.print(
                 f"[bold red]{icons['error']} Configuration file not found![/bold red]\n"
@@ -105,8 +111,11 @@ def main():
             console.print(f"Using ChatGPT plan. Manage usage: {MANAGE_USAGE_URL}")
 
         # Create and run orchestrator
-        orchestrator = HorizonOrchestrator(config, storage, console=console)
-        asyncio.run(orchestrator.run(force_hours=args.hours))
+        orchestrator = HorizonOrchestrator(
+            config, storage, console=console, publish_site=user is None or user.publish_site
+        )
+        force_hours = args.hours or (user.time_window_hours if user else None)
+        asyncio.run(orchestrator.run(force_hours=force_hours))
 
     except KeyboardInterrupt:
         console.print(f"\n[yellow]{icons['warning']} Interrupted by user[/yellow]")
