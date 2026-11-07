@@ -659,3 +659,103 @@ def test_fetch_replies_no_conversation_id_returns_empty(monkeypatch):
     result = asyncio.run(scraper.fetch_replies_for_item(item))
     asyncio.run(client.aclose())
     assert result == []
+
+
+def test_poll_timeout_includes_http_request_time(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+    from types import SimpleNamespace
+    import src.scrapers.twitter as module
+
+    clock = [0.0]
+    timeouts = []
+
+    async def get(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock[0] += 6.0
+        response = MagicMock()
+        response.json.return_value = {"data": {"status": "SUCCEEDED" if len(timeouts) == 2 else "RUNNING"}}
+        return response
+
+    async def sleep(delay):
+        clock[0] += delay
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]), raising=False)
+    monkeypatch.setattr(module, "_MAX_WAIT", 10)
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    scraper = TwitterScraper(TwitterConfig(), AsyncMock())
+    scraper.client.get.side_effect = get
+    assert asyncio.run(scraper._wait_for_run("synthetic-token", "synthetic-run")) is False
+    assert timeouts == [10.0, 1.0]
+
+
+def test_poll_wall_clock_budget_cancels_a_blocked_request(monkeypatch):
+    from unittest.mock import AsyncMock
+    import src.scrapers.twitter as module
+
+    monkeypatch.setattr(module, "_MAX_WAIT", 0.05)
+    cancelled = []
+
+    async def blocked_request(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(True)
+
+    async def run():
+        scraper = TwitterScraper(TwitterConfig(), AsyncMock())
+        scraper.client.get.side_effect = blocked_request
+        result = await asyncio.wait_for(
+            scraper._wait_for_run("synthetic-token", "synthetic-run"), timeout=0.5,
+        )
+        assert result is False
+        assert cancelled == [True]
+
+    asyncio.run(run())
+
+
+def test_playwright_does_not_attribute_nested_quoted_tweets_to_timeline_owner(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import src.scrapers.twitter_playwright as module
+
+    callbacks = {}
+    quoted = {"rest_id": "quoted", "legacy": {
+        "full_text": "Someone else's claim", "created_at": "Tue Jan 01 00:00:00 +0000 2030",
+    }}
+    payload = {"entries": [{"result": {"rest_id": "original", "legacy": {
+        "full_text": "Timeline owner comments on a quote", "created_at": "Tue Jan 01 00:00:00 +0000 2030",
+    }, "quoted_status_result": {"result": quoted}}}]}
+    page = SimpleNamespace(
+        on=lambda event, handler: callbacks.update({event: handler}),
+        route=AsyncMock(), close=AsyncMock(), evaluate=AsyncMock(return_value=""),
+    )
+
+    async def goto(*args, **kwargs):
+        await callbacks["response"](SimpleNamespace(
+            url="https://x.com/i/api/graphql/UserTweets", json=AsyncMock(return_value=payload),
+        ))
+
+    page.goto = goto
+    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock())
+    scraper = TwitterPlaywrightScraper(_make_config())
+    items = asyncio.run(scraper._scrape_user(
+        SimpleNamespace(new_page=AsyncMock(return_value=page)), "owner",
+        datetime(2029, 1, 1, tzinfo=timezone.utc),
+    ))
+    assert [item["tweet_id"] for item in items] == ["original"]
+    assert items[0]["text"] == "Timeline owner comments on a quote"
+
+
+def test_self_replies_use_account_handle_not_display_name():
+    scraper = TwitterScraper(_make_config(), None)
+    raw = _tweet("original", screen_name="karpathy")
+    raw["user"]["name"] = "Andrej Karpathy"
+    item = scraper._parse_item(raw, datetime.now(timezone.utc) - timedelta(days=1))
+    lines = scraper._extract_reply_lines(item, [
+        _reply_row("self", handle="KARPATHY", text="Author follow-up", likes=100),
+        _reply_row("other", handle="alice", text="Independent discussion", likes=10),
+    ], 3)
+    assert item.author == "Andrej Karpathy"
+    assert len(lines) == 1
+    assert "alice" in lines[0]
+    assert "Author follow-up" not in lines[0]
