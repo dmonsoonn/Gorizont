@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -45,13 +46,30 @@ def user_path(data_dir: Path, user_id: str) -> Path:
     return users_dir(data_dir) / f"{user_id}.json"
 
 
+def _owner_id() -> Optional[int]:
+    value = os.environ.get("HORIZON_OWNER_ID", "")
+    return int(value) if _USER_ID_PATTERN.fullmatch(value) else None
+
+
+def _expand_user_env(data: Any, user_id: int, path: Path) -> Any:
+    if user_id == _owner_id():
+        return _expand_env_vars(data)
+    names = sorted(set(_ENV_VAR_PATTERN.findall(json.dumps(data))))
+    if names:
+        raise ConfigError(
+            f"{path} references {', '.join(names)}: environment variables are expanded "
+            "only in the owner's file (HORIZON_OWNER_ID)"
+        )
+    return data
+
+
 def load_user(data_dir: Path, user_id: str) -> UserConfig:
     path = user_path(data_dir, user_id)
     if not path.exists():
         raise ConfigError(f"User config not found: {path}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        user = UserConfig.model_validate(_expand_env_vars(data))
+        user = UserConfig.model_validate(_expand_user_env(data, int(user_id), path))
     except (json.JSONDecodeError, ValidationError) as exc:
         raise ConfigError(f"Invalid user config {path}\nDetails: {exc}") from exc
     if user.id != int(user_id):

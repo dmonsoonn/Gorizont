@@ -78,6 +78,7 @@ def test_overlay_without_sources_keeps_base_sources():
 
 
 def test_load_user_expands_env_vars(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "@owner")
     write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}"})
 
@@ -106,6 +107,7 @@ def test_load_user_rejects_empty_chat_id(tmp_path):
 
 
 def test_overlay_rejects_unexpanded_chat_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}"})
     user = load_user(tmp_path, "111")
@@ -115,6 +117,7 @@ def test_overlay_rejects_unexpanded_chat_id(tmp_path, monkeypatch):
 
 
 def test_due_users_does_not_need_chat_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}", "publish_site": True})
 
@@ -162,6 +165,79 @@ def test_time_window_must_divide_day(tmp_path, hours):
 
     with pytest.raises(ConfigError, match="time_window_hours"):
         load_user(tmp_path, "111")
+
+
+def test_owner_file_expands_env_vars(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    monkeypatch.setenv("LWN_KEY", "lwn-key")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@owner")
+    sources = {"rss": [{"name": "LWN", "url": "https://lwn.example.com/feed?key=${LWN_KEY}"}]}
+    write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}", "sources": sources})
+
+    config = apply_overlay(base_config(), load_user(tmp_path, "111"))
+
+    assert str(config.sources.rss[0].url) == "https://lwn.example.com/feed?key=lwn-key"
+    assert config.webhook.request_body["chat_id"] == "@owner"
+
+
+def test_non_owner_file_cannot_reference_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    monkeypatch.setenv("GROQ_API_KEY", "secret-value")
+    sources = {"rss": [{"name": "Evil", "url": "https://evil.example/feed?k=${GROQ_API_KEY}"}]}
+    write_user(tmp_path, "222", {"id": 222, "sources": sources})
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_user(tmp_path, "222")
+
+    message = str(excinfo.value)
+    assert "222.json" in message
+    assert "GROQ_API_KEY" in message
+    assert "secret-value" not in message
+
+
+def test_non_owner_chat_id_cannot_reference_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@owner")
+    write_user(tmp_path, "222", {"id": 222, "chat_id": "${TELEGRAM_CHAT_ID}"})
+
+    with pytest.raises(ConfigError, match="TELEGRAM_CHAT_ID"):
+        load_user(tmp_path, "222")
+
+
+@pytest.mark.parametrize("owner_id", [None, "abc", ""])
+def test_env_refs_need_owner_id(tmp_path, monkeypatch, owner_id):
+    if owner_id is None:
+        monkeypatch.delenv("HORIZON_OWNER_ID", raising=False)
+    else:
+        monkeypatch.setenv("HORIZON_OWNER_ID", owner_id)
+    monkeypatch.setenv("LWN_KEY", "lwn-key")
+    sources = {"rss": [{"name": "LWN", "url": "https://lwn.example.com/feed?key=${LWN_KEY}"}]}
+    write_user(tmp_path, "111", {"id": 111, "sources": sources})
+
+    with pytest.raises(ConfigError, match="HORIZON_OWNER_ID"):
+        load_user(tmp_path, "111")
+
+
+def test_plain_dollar_is_not_an_env_ref(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    sources = {"rss": [{"name": "Dollar", "url": "https://x.example/feed?a=$b"}]}
+    write_user(tmp_path, "222", {"id": 222, "sources": sources})
+
+    assert str(load_user(tmp_path, "222").sources.rss[0].url) == "https://x.example/feed?a=$b"
+
+
+def test_due_users_marks_non_owner_env_refs_broken(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    monkeypatch.delenv("LWN_KEY", raising=False)
+    owner_sources = {"rss": [{"name": "LWN", "url": "https://lwn.example.com/feed?key=${LWN_KEY}"}]}
+    evil_sources = {"rss": [{"name": "Evil", "url": "https://evil.example/feed?k=${GROQ_API_KEY}"}]}
+    write_user(tmp_path, "111", {"id": 111, "publish_site": True, "sources": owner_sources})
+    write_user(tmp_path, "222", {"id": 222, "sources": evil_sources})
+
+    assert due_users(tmp_path, 0) == [
+        {"user": "111", "publish_site": True},
+        {"user": "222", "publish_site": False},
+    ]
 
 
 def test_users_do_not_share_sources_or_chat(tmp_path):
