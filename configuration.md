@@ -127,6 +127,27 @@ OPENAI_API_KEY=sk-your-key
 GOOGLE_API_KEY=your-gemini-key
 ```
 
+To keep running when one key hits its rate limit or quota, list more
+environment variables in `fallback_api_key_envs`. Horizon starts with
+`api_key_env` and, after a 429, quota or 503 error, switches to the next key
+with the same provider, model and `base_url`, staying on it for the rest of
+the run. Variables that are not set are skipped. The list is ignored when
+`provider_chain` is set.
+
+```json
+{
+  "ai": {
+    "provider": "openai",
+    "base_url": "https://api.groq.com/openai/v1",
+    "api_key_env": "GROQ_API_KEY",
+    "fallback_api_key_envs": ["GROQ_API_KEY_2", "GROQ_API_KEY_3"]
+  }
+}
+```
+
+Some providers, Groq among them, apply rate limits per organization rather
+than per key, so extra keys only help when they belong to different accounts.
+
 When Horizon starts, environment variables have priority because
 the active config file does not store the secret. For local VS Code runs, create
 `.env` in the repository root and launch Horizon from that same root directory.
@@ -824,7 +845,7 @@ Set `RESEND_API_KEY` in `.env`. Recipients are loaded from `<data-dir>/subscribe
 
 ## Webhook Notification
 
-Webhook notification is optional and disabled unless `webhook.enabled` is `true`. Horizon can call Feishu/Lark, DingTalk, Slack, Discord, or any custom webhook endpoint when the pipeline succeeds or fails.
+Webhook notification is optional and disabled unless `webhook.enabled` is `true`. Horizon can call Feishu/Lark, DingTalk, Slack, Discord, Telegram, or any custom webhook endpoint when the pipeline succeeds or fails.
 
 ```json
 {
@@ -849,7 +870,7 @@ Webhook notification is optional and disabled unless `webhook.enabled` is `true`
 - `url_env`: Environment variable that contains the webhook URL. For example, set `HORIZON_WEBHOOK_URL=https://...` in `.env`.
 - `delivery`: Controls how messages are sent. Use `summary` for one full message, or `summary_and_items` for one overview message followed by one message per selected item.
 - `overview_position`: Controls where the overview is sent in `summary_and_items` mode. Use `first` for the traditional order, or `last` to send item details in reverse and keep the overview as the newest chat message.
-- `platform`: Optional webhook platform hint. Use `generic` by default, or `feishu` / `lark` to enable platform-specific card rendering.
+- `platform`: Optional webhook platform hint. Use `generic` by default, `feishu` / `lark` to enable platform-specific card rendering, or `telegram` to send Telegram rich messages.
 - `layout`: Controls the message layout. Use `markdown` for templated Markdown delivery, or `collapsible` with `platform: "feishu"` / `"lark"` for a single Feishu Card JSON 2.0 message with each item in a collapsed panel.
 - `fallback_layout`: Reserved fallback layout for unsupported platform/layout combinations. The current safe fallback is `markdown`.
 - `languages`: Optional webhook-only language filter. Use `["zh"]` or `["en"]` to send only selected languages; use `null` or omit it to send all configured `ai.languages`.
@@ -929,6 +950,33 @@ Use `#{key?limit=N&split=DELIM}` to truncate long values by splitting on `DELIM`
 ```text
 #{summary?limit=3000&split=---}
 ```
+
+### Telegram
+
+Create a bot with [@BotFather](https://t.me/BotFather), add it to your channel or group as an administrator that can post messages, and set the webhook URL to the Bot API `sendRichMessage` method:
+
+```bash
+HORIZON_WEBHOOK_URL=https://api.telegram.org/bot<TOKEN>/sendRichMessage
+TELEGRAM_CHAT_ID=@your_channel
+```
+
+Use `@channel_username` for a public channel, or the numeric `-100...` chat ID for a private channel or group.
+
+```json
+{
+  "webhook": {
+    "enabled": true,
+    "url_env": "HORIZON_WEBHOOK_URL",
+    "platform": "telegram",
+    "request_body": {
+      "chat_id": "${TELEGRAM_CHAT_ID}",
+      "rich_message": {"markdown": "#{summary}"}
+    }
+  }
+}
+```
+
+With `platform: "telegram"`, Horizon sends the digest as a [rich message](https://core.telegram.org/bots/api/rich-messages): an overview followed by profile sections, with each item collapsed into an expandable block that holds its full summary and links. `delivery` and `layout` are ignored. A digest longer than the rich message limit is split between items into numbered parts, sent 3 seconds apart to stay within Telegram's per-chat rate limit. Log output masks the bot token in the URL.
 
 ### DingTalk
 
