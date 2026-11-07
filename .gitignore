@@ -63,3 +63,6 @@ logs/*.log
 todo.txt
 .ruff_cache
 .pytest_cache
+
+# Claude task state
+.claude/state/
