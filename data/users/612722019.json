@@ -13,11 +13,6 @@
     "hackernews": {
       "enabled": false
     },
-    "rss": [
-      {
-        "name": "РИА Новости",
-        "url": "https://ria.ru/export/rss2/archive/index.xml"
-      }
-    ]
+    "rss": []
   }
 }
