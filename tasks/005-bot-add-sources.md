@@ -1,7 +1,7 @@
 ---
 id: 005
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -91,7 +91,7 @@ reopened: false
 | AC9 | `bot.test.ts` «keeps the owner's fields and turns Hacker News off»; `sources.test.ts` «turns Hacker News off…», «leaves an existing owner's sources block…» | PASS |
 | AC10 | scratchpad `ac10/gen.mts` (`addSource` для всех 6 типов, файл владельца с `${TELEGRAM_CHAT_ID}`, новый пользователь) → `HORIZON_OWNER_ID=612722019 uv run python -c 'load_user…; due_users(d, 6)'`: все 3 файла ok, у владельца `hn False`, `chat -100123`, `due` включает всех | PASS |
 | AC11 | `bot.test.ts` «answers /help with the command list» (новый текст), «explains sources and the public repository after approval» | PASS |
-| AC12 | `npm test` → 179 passed; `npm run typecheck` → ok; `npx wrangler deploy --dry-run` → ok (33.56 KiB); `uv run pytest` → 1051 passed. CI `bot-deploy.yml` и живой E2E — не выполнялись: нужен пуш, ждёт разрешения | NOT VERIFIED (CI, живой бот) |
+| AC12 | `npm test` → 179 passed; `npm run typecheck` → ok; `npx wrangler deploy --dry-run` → ok (33.56 KiB); `uv run pytest` → 1051 passed. CI `bot-deploy.yml` run 42523317530 — все шаги ✓. Живой бот от владельца 612722019: добавление канала `3ca463f` и «Отменить» `14e4a05` (автор «Gorizont bot»), `chat_id` сохранён, `hackernews: {enabled: false}`, файл проходит `load_user` и `due_users`. От второго аккаунта 1043052224 коммитов нет — по решению пользователя закрыто без этой проверки | PASS (владелец); NOT VERIFIED (второй аккаунт) |
 | N1 | `bot.test.ts` «asks a stranger to /start first without touching GitHub files or the network» | PASS |
 | N2 | `bot.test.ts` «undo by someone without that source changes nothing», «undo twice reports a stale button», «refuses an expired, foreign or replaced feed choice» | PASS |
 | N3 | `bot.test.ts` «does not understand %s» (6 вводов); `sources.test.ts` «rejects %j» (21 ввод, в том числе `t.me/c/…`, короткий канал, URL > 2048) | PASS |
