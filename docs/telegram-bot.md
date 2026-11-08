@@ -39,7 +39,7 @@ An approved user sends a link or forwards a post; there is no separate command. 
 
 - Telegram, Reddit and GitHub names are checked only against the same patterns as the Python whitelist; the bot does not look them up.
 - For a link the bot downloads the page (10 s timeout, at most 1 MB). An RSS or Atom document is added as is, named after its `<title>` (up to 100 characters, the host name if empty). An HTML page is searched for `<link rel="alternate">` feeds: one feed is added directly, several (up to 5) are offered as buttons. The offer is kept in KV (`feeds:<id>`) for 10 minutes.
-- Every change is a commit by `Gorizont bot` that edits only the affected list; other fields, including `${VAR}` in the owner's file, stay as they are. When the bot creates the owner's `sources` block, it also writes `"hackernews": {"enabled": false}`, because the owner's file would otherwise get Hacker News by default.
+- Every change is a commit by `Gorizont bot` that edits only the affected list; other fields, including `${VAR}` in the owner's file, stay as they are.
 - The reply has an **Undo** button that removes the source with a second commit. It acts on the file of whoever presses it.
 - At most 20 sources per user, the owner included; disabled ones count. A source that is already there is reported without a commit. Input containing `${` is refused.
 - If the file changed between reading and writing, the bot reads it again and retries once.

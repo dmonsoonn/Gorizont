@@ -232,7 +232,7 @@ async function editUser<T>(userId: number, deps: Deps, change: (data: UserData) 
 
 function saveSource(userId: number, source: Source, deps: Deps): Promise<Saved> {
   return editUser<Saved>(userId, deps, (data) => {
-    const result = addSource(data, source, userId === deps.ownerId);
+    const result = addSource(data, source);
     if (typeof result === "string") {
       return { outcome: result };
     }

@@ -106,7 +106,7 @@ describe("addSource", () => {
   const tg: Source = { kind: "telegram", channel: "durov_news" };
 
   it("creates a minimal sources block for a new user", () => {
-    const result = addSource({ id: 123, time_window_hours: 6 }, tg, false);
+    const result = addSource({ id: 123, time_window_hours: 6 }, tg);
     expect(result).toEqual({ data: { id: 123, time_window_hours: 6, sources: { telegram: { channels: [{ channel: "durov_news" }] } } } });
   });
 
@@ -117,7 +117,7 @@ describe("addSource", () => {
     [{ kind: "github_repo", owner: "astral-sh", repo: "uv" }, { github: [{ type: "repo_releases", owner: "astral-sh", repo: "uv" }] }],
     [{ kind: "github_user", username: "torvalds" }, { github: [{ type: "user_events", username: "torvalds" }] }],
   ])("writes %j to its list", (source, sources) => {
-    expect(addSource({ id: 1 }, source, false)).toEqual({ data: { id: 1, sources } });
+    expect(addSource({ id: 1 }, source)).toEqual({ data: { id: 1, sources } });
   });
 
   it("does not mutate the input and keeps other fields and lists", () => {
@@ -127,7 +127,7 @@ describe("addSource", () => {
       sources: { rss: [{ name: "A", url: "https://a.example/feed", enabled: false }], reddit: { subreddits: [{ subreddit: "go" }] } },
     };
     const before = structuredClone(data);
-    const result = addSource(data, { kind: "subreddit", subreddit: "rust" }, false);
+    const result = addSource(data, { kind: "subreddit", subreddit: "rust" });
     expect(data).toEqual(before);
     expect(result).toEqual({
       data: {
@@ -141,19 +141,19 @@ describe("addSource", () => {
     });
   });
 
-  it("turns Hacker News off when it creates the owner's sources block", () => {
-    const result = addSource({ id: 612722019, chat_id: "${TELEGRAM_CHAT_ID}" }, tg, true);
+  it("creates the owner's sources block with only the new source", () => {
+    const result = addSource({ id: 612722019, chat_id: "${TELEGRAM_CHAT_ID}" }, tg);
     expect(result).toEqual({
       data: {
         id: 612722019,
         chat_id: "${TELEGRAM_CHAT_ID}",
-        sources: { telegram: { channels: [{ channel: "durov_news" }] }, hackernews: { enabled: false } },
+        sources: { telegram: { channels: [{ channel: "durov_news" }] } },
       },
     });
   });
 
   it("leaves an existing owner's sources block as it is", () => {
-    const result = addSource({ id: 612722019, sources: { hackernews: { enabled: true } } }, tg, true);
+    const result = addSource({ id: 612722019, sources: { hackernews: { enabled: true } } }, tg);
     expect(result).toEqual({
       data: { id: 612722019, sources: { hackernews: { enabled: true }, telegram: { channels: [{ channel: "durov_news" }] } } },
     });
@@ -174,15 +174,14 @@ describe("addSource", () => {
         github: [{ type: "repo_releases", owner: "astral-sh", repo: "uv" }],
       },
     };
-    expect(addSource(data, source, false)).toBe("duplicate");
+    expect(addSource(data, source)).toBe("duplicate");
   });
 
   it("refuses the 21st source, counting disabled ones", () => {
     const channels = Array.from({ length: 19 }, (_, i) => ({ channel: `channel_${i}`, enabled: false }));
     const data = { id: 1, sources: { telegram: { channels }, github: [{ type: "user_events", username: "torvalds" }] } };
     expect(countSources(data)).toBe(20);
-    expect(addSource(data, { kind: "subreddit", subreddit: "rust" }, false)).toBe("limit");
-    expect(addSource(data, { kind: "subreddit", subreddit: "rust" }, true)).toBe("limit");
+    expect(addSource(data, { kind: "subreddit", subreddit: "rust" })).toBe("limit");
   });
 
   it("counts only the whitelisted lists", () => {
@@ -191,8 +190,8 @@ describe("addSource", () => {
   });
 
   it("fails on a malformed sources block instead of overwriting it", () => {
-    expect(() => addSource({ id: 1, sources: { telegram: { channels: "x" } } }, tg, false)).toThrow("not a list");
-    expect(() => addSource({ id: 1, sources: [] }, tg, false)).toThrow("not an object");
+    expect(() => addSource({ id: 1, sources: { telegram: { channels: "x" } } }, tg)).toThrow("not a list");
+    expect(() => addSource({ id: 1, sources: [] }, tg)).toThrow("not an object");
   });
 });
 

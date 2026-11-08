@@ -127,6 +127,13 @@ def _restrict_user_sources(data: Any, path: Path) -> Any:
     return {**data, "sources": {**sources.model_dump(), "hackernews": {"enabled": False}}}
 
 
+def _default_hackernews_off(data: Any) -> Any:
+    sources = data.get("sources") if isinstance(data, dict) else None
+    if not isinstance(sources, dict) or "hackernews" in sources:
+        return data
+    return {**data, "sources": {**sources, "hackernews": {"enabled": False}}}
+
+
 def _reject_env_refs(data: Any, path: Path) -> Any:
     names = sorted(set(_ENV_VAR_PATTERN.findall(json.dumps(data))))
     if names:
@@ -144,7 +151,7 @@ def load_user(data_dir: Path, user_id: str) -> UserConfig:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if int(user_id) == _owner_id():
-            data = _expand_env_vars(data)
+            data = _default_hackernews_off(_expand_env_vars(data))
         else:
             data = _restrict_user_sources(_reject_env_refs(data, path), path)
         user = UserConfig.model_validate(data)

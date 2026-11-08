@@ -279,6 +279,13 @@ def test_non_owner_sources_keep_hackernews_off(tmp_path, monkeypatch):
     assert load_user(tmp_path, "222").sources.hackernews.enabled is False
 
 
+def test_owner_sources_keep_hackernews_off_unless_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "111", {"id": 111, "sources": {"rss": rss_feeds(1)}})
+
+    assert load_user(tmp_path, "111").sources.hackernews.enabled is False
+
+
 def test_owner_sources_are_not_restricted(tmp_path, monkeypatch):
     monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     sources = {

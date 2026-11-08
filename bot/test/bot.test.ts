@@ -407,7 +407,7 @@ describe("adding sources", () => {
     expect(lastText(bot)).toBe("Уже есть: Telegram @Durov_News.");
   });
 
-  it("keeps the owner's fields and turns Hacker News off", async () => {
+  it("keeps the owner's fields", async () => {
     const bot = setup([OWNER]);
     bot.files.set(OWNER, { id: OWNER, chat_id: "${TELEGRAM_CHAT_ID}", time_window_hours: 1 });
     await bot.run(text(OWNER_USER, "@durov_news"));
@@ -415,7 +415,7 @@ describe("adding sources", () => {
       id: OWNER,
       chat_id: "${TELEGRAM_CHAT_ID}",
       time_window_hours: 1,
-      sources: { telegram: { channels: [{ channel: "durov_news" }] }, hackernews: { enabled: false } },
+      sources: { telegram: { channels: [{ channel: "durov_news" }] } },
     });
   });
 

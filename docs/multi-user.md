@@ -26,7 +26,7 @@ Every user has a file `data/users/<telegram_id>.json`:
 | `chat_id` | `id` | Where the digest goes: the user's private chat with the bot, a channel (`@name`) or a group. The bot must be an admin of a channel to post there. |
 | `time_window_hours` | `1` | Collection window and digest frequency. Must divide 24: the user runs at UTC hours divisible by it. |
 | `publish_site` | `false` | Publish the digest to GitHub Pages and send email. Only the site owner should set it. |
-| `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. In the owner's file, missing source types take the model defaults, and Hacker News is on by default: set `"hackernews": {"enabled": false}` to keep it off. Other users are limited as described below. |
+| `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. In the owner's file, missing source types take the model defaults; Hacker News is off unless the file sets `"hackernews": {"enabled": true}`. Other users are limited as described below. |
 
 `${VAR}` references are expanded from the environment only in the owner's file: the one whose `id` equals the `HORIZON_OWNER_ID` environment variable. Any `${VAR}` in another user's file is a validation error, so a user file cannot read secrets such as AI keys. `users-digest.yml` sets `HORIZON_OWNER_ID` in both jobs; for local runs export it or add it to your dotenv file.
 

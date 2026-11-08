@@ -240,9 +240,8 @@ export function countSources(data: UserData): number {
   return sources ? LISTS.reduce((total, list) => total + entries(sources, list).length, 0) : 0;
 }
 
-export function addSource(data: UserData, source: Source, isOwner: boolean): { data: UserData } | "duplicate" | "limit" {
+export function addSource(data: UserData, source: Source): { data: UserData } | "duplicate" | "limit" {
   const next = structuredClone(data);
-  const created = next.sources === undefined;
   const sources = container(next, "sources", true) as Record<string, unknown>;
   const { list, entry } = place(source);
   const key = list.key(entry);
@@ -253,9 +252,6 @@ export function addSource(data: UserData, source: Source, isOwner: boolean): { d
     return "limit";
   }
   entries(sources, list, true).push(entry);
-  if (created && isOwner) {
-    sources.hackernews = { enabled: false };
-  }
   return { data: next };
 }
 
