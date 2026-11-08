@@ -32,6 +32,10 @@
       "finance-news": {
         "threshold": 7.0,
         "topic_dedup": true
+      },
+      "ai-creator": {
+        "threshold": 7.0,
+        "topic_dedup": true
       }
     }
   },
