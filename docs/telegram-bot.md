@@ -13,7 +13,8 @@ People join Horizon through the same Telegram bot that sends the digests. A pers
 Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API──► data/users/<id>.json in main
                             │                                              │
                        Workers KV                              users-digest.yml (hourly)
-                 (pending / rejected requests)                 sends digests with the same bot
+            (pending / rejected requests,                      sends digests with the same bot
+                 feed choices)
 ```
 
 - Telegram delivers every update to the Worker URL with the `X-Telegram-Bot-Api-Secret-Token` header. Requests without the right header get `401`.
@@ -24,6 +25,25 @@ Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API─�
 - Commands: `/start`, `/help`. The bot ignores groups and channels.
 
 A new user has no sources, so their digest stays empty until they add some. The digest is delivered only while `users-digest.yml` is enabled.
+
+## Adding sources
+
+An approved user sends a link or forwards a post; there is no separate command. Anything that is not a command is read as a source:
+
+| Input | Written to |
+|---|---|
+| `t.me/<channel>`, `t.me/s/<channel>`, a post link, `@<channel>`, a post forwarded from a public channel | `telegram.channels` |
+| `r/<name>`, `reddit.com/r/<name>` / `u/<name>`, `reddit.com/user/<name>` | `reddit.subreddits` / `reddit.users` |
+| `github.com/<owner>/<repo>` / `github.com/<user>` | `github`: `repo_releases` / `user_events` |
+| any other `http(s)` link | `rss` |
+
+- Telegram, Reddit and GitHub names are checked only against the same patterns as the Python whitelist; the bot does not look them up.
+- For a link the bot downloads the page (10 s timeout, at most 1 MB). An RSS or Atom document is added as is, named after its `<title>` (up to 100 characters, the host name if empty). An HTML page is searched for `<link rel="alternate">` feeds: one feed is added directly, several (up to 5) are offered as buttons. The offer is kept in KV (`feeds:<id>`) for 10 minutes.
+- Every change is a commit by `Gorizont bot` that edits only the affected list; other fields, including `${VAR}` in the owner's file, stay as they are. When the bot creates the owner's `sources` block, it also writes `"hackernews": {"enabled": false}`, because the owner's file would otherwise get Hacker News by default.
+- The reply has an **Undo** button that removes the source with a second commit. It acts on the file of whoever presses it.
+- At most 20 sources per user, the owner included; disabled ones count. A source that is already there is reported without a commit. Input containing `${` is refused.
+- If the file changed between reading and writing, the bot reads it again and retries once.
+- The repository is public, so the bot tells users that their list of sources is public too.
 
 KV is eventually consistent: two `/start` messages a few seconds apart may produce two requests. The second approval is reported as "already connected".
 
