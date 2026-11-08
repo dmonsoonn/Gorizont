@@ -22,6 +22,7 @@ export default {
         github: createGitHub(env.GITHUB_TOKEN, env.GITHUB_REPO, fetch),
         kv: env.KV,
         ownerId: Number(env.OWNER_ID),
+        fetcher: fetch,
       });
     } catch (error) {
       console.error(error);

@@ -1,11 +1,41 @@
+import { discoverFeeds, fetchFeed, type Feed } from "./feeds";
 import { NEW_USER_WINDOW_HOURS, type GitHub } from "./github";
+import {
+  addSource,
+  keyHash,
+  MAX_SOURCES,
+  parseInput,
+  removeSource,
+  sourceKey,
+  sourceLabel,
+  type ForwardOrigin,
+  type Source,
+  type UserData,
+} from "./sources";
 import type { Telegram } from "./telegram";
 
 export const PENDING_TTL_SECONDS = 24 * 60 * 60;
+export const FEEDS_TTL_SECONDS = 10 * 60;
 
 const CALLBACK_PATTERN = /^(approve|reject):([1-9][0-9]{0,14})$/;
+const UNDO_PATTERN = /^undo:([0-9a-f]{8})$/;
+const FEED_PATTERN = /^feed:([0-9a-f]{8}):([0-4])$/;
+const COMMAND_PATTERN = /^\/[A-Za-z0-9_]+$/;
+const FEED_BUTTON_LENGTH = 60;
 
-const HELP = "Команды:\n/start — подключиться к Горизонту\n/help — список команд";
+const HELP = [
+  "Команды:",
+  "/start — подключиться к Горизонту",
+  "/help — список команд",
+  "",
+  "Чтобы добавить источник, пришлите ссылку или перешлите пост из канала:",
+  "• Telegram: t.me/канал, @канал или пересланный пост",
+  "• Reddit: r/сабреддит, u/пользователь или ссылка на них",
+  "• GitHub: github.com/владелец/репозиторий (релизы) или github.com/пользователь (активность)",
+  "• RSS: ссылка на фид или на сайт, фид найду сам",
+  "",
+  `Не больше ${MAX_SOURCES} источников. Список ваших источников хранится в публичном репозитории.`,
+].join("\n");
 const WELCOME_BACK = `Вы уже подключены к Горизонту.\n\n${HELP}`;
 const REQUEST_SENT = "Заявка отправлена владельцу. Я напишу, когда её рассмотрят.";
 const REQUEST_PENDING = "Заявка уже на рассмотрении.";
@@ -15,6 +45,14 @@ const UNKNOWN = "Не понимаю. Список команд — /help.";
 const NOT_OWNER = "Решать заявки может только владелец.";
 const BAD_CALLBACK = "Некорректная кнопка.";
 const ALREADY_USER = "Пользователь уже подключён.";
+const NEED_START = "Сначала подключитесь к Горизонту: /start.";
+const PRIVATE_FORWARD = "Подходят только публичные каналы с @username. Перешлите пост из такого канала или пришлите ссылку t.me/канал.";
+const FEED_NOT_FOUND = "Не нашёл RSS-фид по этой ссылке. Пришлите прямую ссылку на фид.";
+const CHOOSE_FEED = "На странице несколько фидов. Какой добавить?";
+const CHOICE_EXPIRED = "Выбор устарел, пришлите ссылку снова.";
+const STALE_BUTTON = "Кнопка устарела.";
+const SAVE_FAILED = "Не удалось сохранить, попробуйте ещё раз.";
+const LIMIT = `Уже ${MAX_SOURCES} источников, это максимум. Новый не добавлен.`;
 
 export interface User {
   id: number;
@@ -28,6 +66,8 @@ export interface Message {
   chat: { id: number; type: string };
   from?: User;
   text?: string;
+  caption?: string;
+  forward_origin?: ForwardOrigin;
 }
 
 export interface CallbackQuery {
@@ -53,10 +93,12 @@ export interface Deps {
   github: GitHub;
   kv: Store;
   ownerId: number;
+  fetcher: typeof fetch;
 }
 
 export const pendingKey = (id: number) => `pending:${id}`;
 export const rejectedKey = (id: number) => `rejected:${id}`;
+export const feedsKey = (id: number) => `feeds:${id}`;
 
 export async function handleUpdate(update: Update, deps: Deps): Promise<void> {
   if (update.message) {
@@ -72,13 +114,17 @@ async function handleMessage(message: Message, deps: Deps): Promise<void> {
   }
   const user = message.from;
   const reply = (text: string) => deps.telegram.call("sendMessage", { chat_id: message.chat.id, text });
-  const command = (message.text ?? "").split(/\s/, 1)[0].split("@", 1)[0];
+  const text = message.text ?? message.caption ?? "";
+  if (message.forward_origin) {
+    return addFromMessage(user.id, text, message.forward_origin, deps);
+  }
+  const command = text.split(/\s/, 1)[0].split("@", 1)[0];
 
   if (command === "/help") {
     return reply(HELP);
   }
   if (command !== "/start") {
-    return reply(UNKNOWN);
+    return COMMAND_PATTERN.test(command) ? reply(UNKNOWN) : addFromMessage(user.id, text, message.forward_origin, deps);
   }
   if (await deps.github.userExists(user.id)) {
     return reply(WELCOME_BACK);
@@ -110,6 +156,14 @@ async function handleCallback(query: CallbackQuery, deps: Deps): Promise<void> {
   const answer = (text?: string) =>
     deps.telegram.call("answerCallbackQuery", text ? { callback_query_id: query.id, text } : { callback_query_id: query.id });
 
+  const undo = UNDO_PATTERN.exec(query.data ?? "");
+  if (undo) {
+    return undoSource(query, undo[1], deps);
+  }
+  const choice = FEED_PATTERN.exec(query.data ?? "");
+  if (choice) {
+    return chooseFeed(query, choice[1], Number(choice[2]), deps);
+  }
   if (query.from.id !== deps.ownerId) {
     return answer(NOT_OWNER);
   }
@@ -149,6 +203,132 @@ async function handleCallback(query: CallbackQuery, deps: Deps): Promise<void> {
   await answer();
   await markDecision(query, "✅ Одобрено", deps);
   await deps.telegram.call("sendMessage", { chat_id: userId, text: APPROVED });
+}
+
+type Saved = "added" | "duplicate" | "limit" | "missing" | "failed";
+
+interface Change<T> {
+  outcome: T;
+  write?: { data: UserData; message: string };
+}
+
+async function editUser<T>(userId: number, deps: Deps, change: (data: UserData) => Change<T>): Promise<T | "missing" | "failed"> {
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const file = await deps.github.readUser(userId);
+      if (!file) {
+        return "missing";
+      }
+      const { outcome, write } = change(file.data);
+      if (!write || (await deps.github.writeUser(userId, write.data, file.sha, write.message)) === "ok") {
+        return outcome;
+      }
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return "failed";
+}
+
+function saveSource(userId: number, source: Source, deps: Deps): Promise<Saved> {
+  return editUser<Saved>(userId, deps, (data) => {
+    const result = addSource(data, source, userId === deps.ownerId);
+    if (typeof result === "string") {
+      return { outcome: result };
+    }
+    return { outcome: "added", write: { data: result.data, message: `chore(users): add ${source.kind} source for ${userId} via bot` } };
+  });
+}
+
+async function announce(userId: number, source: Source, saved: Saved, deps: Deps): Promise<void> {
+  const label = sourceLabel(source);
+  if (saved === "added") {
+    await deps.telegram.call("sendMessage", {
+      chat_id: userId,
+      text: `Добавлено: ${label}`,
+      reply_markup: { inline_keyboard: [[{ text: "Отменить", callback_data: `undo:${keyHash(sourceKey(source))}` }]] },
+    });
+    return;
+  }
+  const texts = { duplicate: `Уже есть: ${label}.`, limit: LIMIT, missing: NEED_START, failed: SAVE_FAILED };
+  await deps.telegram.call("sendMessage", { chat_id: userId, text: texts[saved] });
+}
+
+async function addFromMessage(userId: number, text: string, origin: ForwardOrigin | undefined, deps: Deps): Promise<void> {
+  const reply = (body: string) => deps.telegram.call("sendMessage", { chat_id: userId, text: body });
+  const parsed = parseInput(text, origin);
+  if ("error" in parsed) {
+    return reply(parsed.error === "private_forward" ? PRIVATE_FORWARD : UNKNOWN);
+  }
+  if (!(await deps.github.userExists(userId))) {
+    return reply(NEED_START);
+  }
+  if ("source" in parsed) {
+    return announce(userId, parsed.source, await saveSource(userId, parsed.source, deps), deps);
+  }
+  const found = await discoverFeeds(parsed.feedUrl, deps.fetcher);
+  if ("error" in found) {
+    return reply(FEED_NOT_FOUND);
+  }
+  if ("choices" in found) {
+    return offerFeeds(userId, keyHash(parsed.feedUrl), found.choices, deps);
+  }
+  const source: Source = { kind: "rss", name: found.feed.title, url: found.feed.url };
+  await announce(userId, source, await saveSource(userId, source, deps), deps);
+}
+
+async function offerFeeds(userId: number, nonce: string, choices: Feed[], deps: Deps): Promise<void> {
+  await deps.kv.put(feedsKey(userId), JSON.stringify({ nonce, choices }), { expirationTtl: FEEDS_TTL_SECONDS });
+  await deps.telegram.call("sendMessage", {
+    chat_id: userId,
+    text: CHOOSE_FEED,
+    reply_markup: {
+      inline_keyboard: choices.map((feed, index) => [
+        { text: Array.from(feed.title).slice(0, FEED_BUTTON_LENGTH).join(""), callback_data: `feed:${nonce}:${index}` },
+      ]),
+    },
+  });
+}
+
+async function chooseFeed(query: CallbackQuery, nonce: string, index: number, deps: Deps): Promise<void> {
+  const userId = query.from.id;
+  const stored = await deps.kv.get(feedsKey(userId));
+  const offer: { nonce: string; choices: Feed[] } | null = stored ? JSON.parse(stored) : null;
+  const choice = offer?.nonce === nonce ? offer.choices[index] : undefined;
+  if (!choice) {
+    await deps.telegram.call("answerCallbackQuery", { callback_query_id: query.id, text: CHOICE_EXPIRED });
+    return;
+  }
+  await deps.telegram.call("answerCallbackQuery", { callback_query_id: query.id });
+  const feed = await fetchFeed(choice.url, deps.fetcher);
+  if (!feed) {
+    await deps.telegram.call("sendMessage", { chat_id: userId, text: FEED_NOT_FOUND });
+    return;
+  }
+  const source: Source = { kind: "rss", name: feed.title, url: feed.url };
+  const saved = await saveSource(userId, source, deps);
+  if (saved !== "failed") {
+    await deps.kv.delete(feedsKey(userId));
+    await markDecision(query, `Выбран: ${choice.title}`, deps);
+  }
+  await announce(userId, source, saved, deps);
+}
+
+async function undoSource(query: CallbackQuery, hash: string, deps: Deps): Promise<void> {
+  const userId = query.from.id;
+  const outcome = await editUser<"removed" | "stale">(userId, deps, (data) => {
+    const removed = removeSource(data, hash);
+    if (!removed) {
+      return { outcome: "stale" };
+    }
+    return { outcome: "removed", write: { data: removed.data, message: `chore(users): remove ${removed.kind} source for ${userId} via bot` } };
+  });
+  if (outcome !== "removed") {
+    await deps.telegram.call("answerCallbackQuery", { callback_query_id: query.id, text: outcome === "failed" ? SAVE_FAILED : STALE_BUTTON });
+    return;
+  }
+  await deps.telegram.call("answerCallbackQuery", { callback_query_id: query.id });
+  await markDecision(query, "Отменено", deps);
 }
 
 async function markDecision(query: CallbackQuery, status: string, deps: Deps): Promise<void> {
