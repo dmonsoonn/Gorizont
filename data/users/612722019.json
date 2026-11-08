@@ -4,7 +4,11 @@
   "time_window_hours": 1,
   "sources": {
     "telegram": {
-      "channels": []
+      "channels": [
+        {
+          "channel": "ecotopor"
+        }
+      ]
     },
     "hackernews": {
       "enabled": false
