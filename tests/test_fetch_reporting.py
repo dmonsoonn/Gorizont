@@ -28,6 +28,9 @@ from src.models import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("public_dns")
+
+
 SINCE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 

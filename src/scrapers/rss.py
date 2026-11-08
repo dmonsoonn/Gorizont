@@ -13,6 +13,7 @@ import feedparser
 
 from .base import BaseScraper, FetchResult
 from ..extractors import ExtractorRegistry
+from ..url_security import safe_request
 from ..models import ContentItem, SourceType, RSSSourceConfig
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,10 @@ class RSSScraper(BaseScraper):
             lambda m: os.environ.get(m.group(1), m.group(0)).strip(),
             str(source.url),
         )
-        response = await self.client.get(
+        response = await safe_request(
+            self.client,
+            "GET",
             feed_url,
-            follow_redirects=True,
             headers={"User-Agent": RSS_USER_AGENT},
         )
         response.raise_for_status()

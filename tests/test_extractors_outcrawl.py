@@ -13,6 +13,9 @@ from src.extractors.outcrawl import OUTCRAWL_SCRAPE_URL
 from src.models import OutcrawlExtractorConfig, RSSSourceConfig
 from src.scrapers.rss import RSSScraper
 
+
+pytestmark = pytest.mark.usefixtures("public_dns")
+
 URL = "https://example.com/article"
 
 

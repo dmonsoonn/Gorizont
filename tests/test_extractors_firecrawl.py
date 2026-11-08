@@ -13,6 +13,9 @@ from src.extractors.firecrawl import FIRECRAWL_SCRAPE_URL
 from src.models import FirecrawlExtractorConfig, RSSSourceConfig
 from src.scrapers.rss import RSSScraper
 
+
+pytestmark = pytest.mark.usefixtures("public_dns")
+
 URL = "https://example.com/article"
 
 

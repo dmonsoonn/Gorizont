@@ -4,9 +4,13 @@ import asyncio
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from src.models import RSSSourceConfig
 from src.scrapers.rss import RSSScraper
+
+
+pytestmark = pytest.mark.usefixtures("public_dns")
 
 
 _FEED = """<rss version="2.0"><channel><title>Publisher AI</title>
