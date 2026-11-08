@@ -26,9 +26,20 @@ Every user has a file `data/users/<telegram_id>.json`:
 | `chat_id` | `id` | Where the digest goes: the user's private chat with the bot, a channel (`@name`) or a group. The bot must be an admin of a channel to post there. |
 | `time_window_hours` | `1` | Collection window and digest frequency. Must divide 24: the user runs at UTC hours divisible by it. |
 | `publish_site` | `false` | Publish the digest to GitHub Pages and send email. Only the site owner should set it. |
-| `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. Inside a user's `sources`, missing source types take the model defaults, and Hacker News is on by default: set `"hackernews": {"enabled": false}` to keep it off. |
+| `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. In the owner's file, missing source types take the model defaults, and Hacker News is on by default: set `"hackernews": {"enabled": false}` to keep it off. Other users are limited as described below. |
 
 `${VAR}` references are expanded from the environment only in the owner's file: the one whose `id` equals the `HORIZON_OWNER_ID` environment variable. Any `${VAR}` in another user's file is a validation error, so a user file cannot read secrets such as AI keys. `users-digest.yml` sets `HORIZON_OWNER_ID` in both jobs; for local runs export it or add it to your dotenv file.
+
+Every other user's `sources` may contain only these fields, at most 20 sources in total; anything else is a validation error:
+
+| Type | Fields |
+|---|---|
+| `rss` | `name`, `url`, `enabled` |
+| `telegram.channels` | `channel`, `enabled` |
+| `reddit.subreddits` / `reddit.users` | `subreddit` / `username`, `enabled` |
+| `github` | `type` (`repo_releases` with `owner` and `repo`, or `user_events` with `username`), `enabled` |
+
+Hacker News is always off for them, profiles are chosen by the AI (`auto`), and fetch limits and score thresholds use the defaults. RSS feeds of every user are fetched through `safe_request`, which refuses private, loopback and link-local destinations, including redirects to them.
 
 Everything else (AI provider, keys, profiles, thresholds, webhook URL) comes from the base config. Its webhook must be enabled and have a JSON `request_body`; Horizon replaces `request_body.chat_id` with the user's chat.
 
