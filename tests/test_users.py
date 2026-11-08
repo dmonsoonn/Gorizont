@@ -240,6 +240,124 @@ def test_due_users_marks_non_owner_env_refs_broken(tmp_path, monkeypatch):
     ]
 
 
+ALLOWED_SOURCES = {
+    "rss": [{"name": "Blog", "url": "https://blog.example.com/feed"}],
+    "telegram": {"channels": [{"channel": "durov"}]},
+    "reddit": {"subreddits": [{"subreddit": "python"}], "users": [{"username": "spez", "enabled": False}]},
+    "github": [
+        {"type": "repo_releases", "owner": "astral-sh", "repo": "uv"},
+        {"type": "user_events", "username": "karpathy"},
+    ],
+}
+
+
+def rss_feeds(count: int) -> list[dict]:
+    return [{"name": f"Feed {i}", "url": f"https://feed{i}.example.com/rss"} for i in range(count)]
+
+
+def test_non_owner_allowed_sources_load_without_hackernews(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "222", {"id": 222, "sources": ALLOWED_SOURCES})
+
+    sources = apply_overlay(base_config(), load_user(tmp_path, "222")).sources
+
+    assert [feed.name for feed in sources.rss] == ["Blog"]
+    assert [channel.channel for channel in sources.telegram.channels] == ["durov"]
+    assert [sub.subreddit for sub in sources.reddit.subreddits] == ["python"]
+    assert [(user.username, user.enabled) for user in sources.reddit.users] == [("spez", False)]
+    assert [(gh.type, gh.owner, gh.repo, gh.username) for gh in sources.github] == [
+        ("repo_releases", "astral-sh", "uv", None),
+        ("user_events", None, None, "karpathy"),
+    ]
+    assert sources.hackernews.enabled is False
+
+
+def test_non_owner_sources_keep_hackernews_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "222", {"id": 222, "sources": {"rss": rss_feeds(1)}})
+
+    assert load_user(tmp_path, "222").sources.hackernews.enabled is False
+
+
+def test_owner_sources_are_not_restricted(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    sources = {
+        "rss": [{"name": "Blog", "url": "https://blog.example.com/feed", "profile": "tech-blog", "content_extractor": "trafilatura"}],
+        "hackernews": {"enabled": True, "min_score": 200},
+        "twitter": {"users": ["karpathy"], "apify_token_env": "APIFY_TOKEN"},
+    }
+    write_user(tmp_path, "111", {"id": 111, "sources": sources})
+
+    loaded = load_user(tmp_path, "111").sources
+
+    assert loaded.rss[0].profile == "tech-blog"
+    assert loaded.hackernews.enabled is True
+    assert loaded.twitter.users == ["karpathy"]
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        {"twitter": {"users": ["x"], "apify_token_env": "GROQ_API_KEY"}},
+        {"twitter": {"mode": "playwright", "cookie_dir": "/etc"}},
+        {"rss": [{"name": "Blog", "url": "https://blog.example.com/feed", "profile": "tech-news"}]},
+        {"rss": [{"name": "Blog", "url": "https://blog.example.com/feed", "category": "x"}]},
+        {"rss": [{"name": "Blog", "url": "https://blog.example.com/feed", "content_extractor": "trafilatura"}]},
+        {"telegram": {"channels": [{"channel": "durov", "fetch_limit": 500}]}},
+        {"reddit": {"subreddits": [{"subreddit": "python", "min_score": 0}]}},
+        {"reddit": {"subreddits": [], "fetch_comments": 50}},
+        {"hackernews": {"enabled": True}},
+        {"hackernews": {"enabled": False}},
+        {"google_news": {"enabled": True}},
+        {"gdelt": {"enabled": True}},
+        {"openbb": {"enabled": True}},
+        {"ossinsight": {"enabled": True}},
+        {"github": [{"type": "org_events", "username": "x"}]},
+        {"github": [{"type": "repo_releases", "owner": "astral-sh"}]},
+        {"github": [{"type": "user_events"}]},
+    ],
+)
+def test_non_owner_sources_reject_fields_outside_allowlist(tmp_path, monkeypatch, sources):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "222", {"id": 222, "sources": sources})
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_user(tmp_path, "222")
+
+    assert "222.json" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        {"rss": [{"name": "", "url": "https://blog.example.com/feed"}]},
+        {"telegram": {"channels": [{"channel": "../bot123/getMe"}]}},
+        {"telegram": {"channels": [{"channel": ""}]}},
+        {"reddit": {"subreddits": [{"subreddit": "python/../../api"}]}},
+        {"reddit": {"users": [{"username": "spez?limit=1000"}]}},
+        {"github": [{"type": "user_events", "username": "../../repos/x/y"}]},
+        {"github": [{"type": "repo_releases", "owner": "astral-sh", "repo": ".."}]},
+        {"github": [{"type": "repo_releases", "owner": "astral-sh#", "repo": "uv"}]},
+    ],
+)
+def test_non_owner_source_names_must_be_plain_identifiers(tmp_path, monkeypatch, sources):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "222", {"id": 222, "sources": sources})
+
+    with pytest.raises(ConfigError, match="222.json"):
+        load_user(tmp_path, "222")
+
+
+def test_non_owner_source_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("HORIZON_OWNER_ID", "111")
+    write_user(tmp_path, "222", {"id": 222, "sources": {"rss": rss_feeds(15), "github": [{"type": "user_events", "username": f"u{i}"} for i in range(5)]}})
+    write_user(tmp_path, "333", {"id": 333, "sources": {"rss": rss_feeds(16), "github": [{"type": "user_events", "username": f"u{i}"} for i in range(5)]}})
+
+    assert len(load_user(tmp_path, "222").sources.rss) == 15
+    with pytest.raises(ConfigError, match="20"):
+        load_user(tmp_path, "333")
+
+
 def test_users_do_not_share_sources_or_chat(tmp_path):
     write_user(tmp_path, "111", {"id": 111, "chat_id": "@a", "sources": MY_SOURCES})
     write_user(tmp_path, "222", {"id": 222, "chat_id": "@b", "sources": OTHER_SOURCES})

@@ -2,14 +2,81 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..models import Config, SourcesConfig
 from ..storage.manager import _ENV_VAR_PATTERN, ConfigError, _expand_env_vars
 
 _USER_ID_PATTERN = re.compile(r"[1-9][0-9]*")
+MAX_USER_SOURCES = 20
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _UserRSS(_Strict):
+    name: str = Field(min_length=1, max_length=100)
+    url: str
+    enabled: bool = True
+
+
+class _UserTelegramChannel(_Strict):
+    channel: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
+    enabled: bool = True
+
+
+class _UserTelegram(_Strict):
+    channels: List[_UserTelegramChannel] = Field(default_factory=list)
+
+
+class _UserSubreddit(_Strict):
+    subreddit: str = Field(pattern=r"^[A-Za-z0-9_]{2,21}$")
+    enabled: bool = True
+
+
+class _UserRedditUser(_Strict):
+    username: str = Field(pattern=r"^[A-Za-z0-9_-]{3,20}$")
+    enabled: bool = True
+
+
+class _UserReddit(_Strict):
+    subreddits: List[_UserSubreddit] = Field(default_factory=list)
+    users: List[_UserRedditUser] = Field(default_factory=list)
+
+
+class _UserGitHub(_Strict):
+    type: Literal["repo_releases", "user_events"]
+    owner: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+    repo: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
+    username: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _target_matches_type(self) -> "_UserGitHub":
+        if self.type == "repo_releases" and not (self.owner and self.repo and self.username is None):
+            raise ValueError("repo_releases needs owner and repo only")
+        if self.type == "user_events" and not (self.username and self.owner is None and self.repo is None):
+            raise ValueError("user_events needs username only")
+        return self
+
+
+class _UserSources(_Strict):
+    rss: List[_UserRSS] = Field(default_factory=list)
+    telegram: _UserTelegram = Field(default_factory=_UserTelegram)
+    reddit: _UserReddit = Field(default_factory=_UserReddit)
+    github: List[_UserGitHub] = Field(default_factory=list)
+
+    def count(self) -> int:
+        return (
+            len(self.rss)
+            + len(self.telegram.channels)
+            + len(self.reddit.subreddits)
+            + len(self.reddit.users)
+            + len(self.github)
+        )
 
 
 class UserConfig(BaseModel):
@@ -51,9 +118,16 @@ def _owner_id() -> Optional[int]:
     return int(value) if _USER_ID_PATTERN.fullmatch(value) else None
 
 
-def _expand_user_env(data: Any, user_id: int, path: Path) -> Any:
-    if user_id == _owner_id():
-        return _expand_env_vars(data)
+def _restrict_user_sources(data: Any, path: Path) -> Any:
+    if not isinstance(data, dict) or "sources" not in data:
+        return data
+    sources = _UserSources.model_validate(data["sources"])
+    if sources.count() > MAX_USER_SOURCES:
+        raise ConfigError(f"{path} has {sources.count()} sources, the limit is {MAX_USER_SOURCES}")
+    return {**data, "sources": {**sources.model_dump(), "hackernews": {"enabled": False}}}
+
+
+def _reject_env_refs(data: Any, path: Path) -> Any:
     names = sorted(set(_ENV_VAR_PATTERN.findall(json.dumps(data))))
     if names:
         raise ConfigError(
@@ -69,7 +143,11 @@ def load_user(data_dir: Path, user_id: str) -> UserConfig:
         raise ConfigError(f"User config not found: {path}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        user = UserConfig.model_validate(_expand_user_env(data, int(user_id), path))
+        if int(user_id) == _owner_id():
+            data = _expand_env_vars(data)
+        else:
+            data = _restrict_user_sources(_reject_env_refs(data, path), path)
+        user = UserConfig.model_validate(data)
     except (json.JSONDecodeError, ValidationError) as exc:
         raise ConfigError(f"Invalid user config {path}\nDetails: {exc}") from exc
     if user.id != int(user_id):
