@@ -1,7 +1,7 @@
 ---
 id: 004
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -88,7 +88,7 @@ reopened: false
 | AC4 | `bot.test.ts` › does not notify the owner twice while the request is pending; TTL `pending` = 86400 в «sends the request…» | PASS |
 | AC5 | `bot.test.ts` › greets an existing user without a request | PASS |
 | AC6 | `bot.test.ts` › answers /help, /help@gorizont_bot, /help extra; points to /help on unknown text; ignores messages outside private chats | PASS |
-| AC7 | `uvx check-jsonschema --builtin-schema vendor.github-workflows .github/workflows/bot-deploy.yml` → ok; `npx wrangler deploy --dry-run --outdir …` → бандл 10.03 KiB, биндинги KV/OWNER_ID/GITHUB_REPO; `wrangler deploy --help` содержит `--secrets-file`; `docs/telegram-bot.md` написан. KV id `eabf6e95…` прописан, `wrangler kv namespace list` подтверждает namespace `gorizont-bot` в аккаунте, dry-run видит `env.KV (eabf6e95…)`. Реальный прогон workflow не делался: секреты/`BOT_URL` не заданы, пуш не разрешён | NOT VERIFIED |
+| AC7 | Run 42474478429 (push в `main`, 2026-11-08): `npm ci`, Test, Typecheck, `wrangler deploy --secrets-file` (`Deployed gorizont-bot … https://gorizont-bot.dmonsoonn.workers.dev`), `setWebhook` (`jq -e '.ok == true'`) — все шаги ✓. Живой Worker: GET → 405, POST без секрета → 401; `wrangler secret list` → GITHUB_TOKEN, TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET. `check-jsonschema` ok; `docs/telegram-bot.md` | PASS |
 | AC8 | `npm test` → 42 passed; `npm run typecheck` → exit 0; `uv run pytest` → 1051 passed | PASS |
 | N1 | `index.test.ts` › rejects secret null/""/wrong with 401 (fetch не вызывается); rejects non-POST (405); rejects everything when the Worker secret is unset (пустой секрет + пустой/нет заголовка → 401, добавлено по ревью). Мутации «убрать проверку секрета» и «убрать проверку пустого секрета» → тесты падают. `npm test` → 42 passed | PASS |
 | N2 | `bot.test.ts` › refuses decisions from anyone but the owner. Мутация «убрать проверку владельца» → тест падает | PASS |
@@ -97,7 +97,7 @@ reopened: false
 | N5 | `index.test.ts` › acknowledges `{not json`, `{}`, `null`, `{"edited_message":{}}` → 200 без вызовов fetch | PASS |
 | N6 | `bot.test.ts` › keeps the request and tells the owner when GitHub fails; `index.test.ts` › acknowledges the update even when Telegram fails (200 + console.error) | PASS |
 | review | reviewer (раунд 2; раунд 1 — BLOCK: пустой `WEBHOOK_SECRET`, исправлено) | PASS |
-| E2E | Реальный сценарий `/start` → кнопка → коммит в `main` в Telegram | NOT VERIFIED (нужен деплой) |
+| E2E | Реальный Telegram 2026-11-08, второй аккаунт (по словам владельца — все 4 шага сценария ✓). Подтверждено артефактами: коммит 793c4a1 `chore(users): add user 1043052224 via bot`, author/committer `Gorizont bot <bot@users.noreply.github.com>`, файл `{"id": 1043052224, "time_window_hours": 6}`; `load_user` → ok; `python -m src.users due --hour 6` включает 1043052224. `wrangler tail`: 3 POST, все `Ok`, ошибок нет (ожидалось ≥4 апдейта — один, вероятно, пришёл до подключения tail или шаг пропущен; повторный `/start` без второго уведомления подтверждён только тестами) | PASS |
 
 ## Knowledge
 
