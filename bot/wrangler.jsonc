@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gorizont-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-20",
+  "vars": {
+    "OWNER_ID": "612722019",
+    "GITHUB_REPO": "dmonsoonn/Gorizont"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "eabf6e95e8ee42c0aedf2163481fcbbc"
+    }
+  ]
+}

@@ -68,3 +68,7 @@ todo.txt
 .claude/state/
 !CLAUDE.md
 !.claude/
+
+# Telegram bot (Cloudflare Worker)
+bot/node_modules/
+bot/.wrangler/
