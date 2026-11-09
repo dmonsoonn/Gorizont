@@ -10,6 +10,9 @@
         },
         {
           "channel": "naebnet"
+        },
+        {
+          "channel": "xor_journal"
         }
       ]
     },
