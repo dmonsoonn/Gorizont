@@ -22,7 +22,7 @@ Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API─�
 - A pending request is stored in KV for 24 hours, so repeated `/start` does not notify the owner again. A rejection is stored without expiry.
 - Approval creates `{"id": <id>, "time_window_hours": 6}` as a commit by `Gorizont bot`. An existing file is never overwritten. If GitHub fails, the owner gets an error message and can press the button again.
 - The Worker always answers Telegram with `200` after the secret check, otherwise Telegram keeps retrying the update.
-- Commands: `/start`, `/help`. The bot ignores groups and channels.
+- Commands: `/start`, `/list`, `/help`. The bot ignores groups and channels.
 
 A new user has no sources, so their digest stays empty until they add some. The digest is delivered only while `users-digest.yml` is enabled.
 
@@ -44,6 +44,17 @@ An approved user sends a link or forwards a post; there is no separate command. 
 - At most 20 sources per user, the owner included; disabled ones count. A source that is already there is reported without a commit. Input containing `${` is refused.
 - If the file changed between reading and writing, the bot reads it again and retries once.
 - The repository is public, so the bot tells users that their list of sources is public too.
+
+## Managing sources
+
+`/list` shows the user's sources as buttons, one per source, marked ✅ (on) or ⏸ (off). Everything happens in that one message:
+
+- A source button opens its card: name, state, link, and **Turn off** / **Turn on**, **Delete**, **Back to list**.
+- Turning a source off writes `"enabled": false` into its entry; turning it on removes the key, since sources are on by default. A button that asks for the state the source already has changes nothing.
+- **Delete** asks for confirmation first, then removes the entry and shows the updated list.
+- Every change is one commit by `Gorizont bot` that touches only that entry. Disabled sources still count towards the limit of 20.
+- Buttons act on the file of whoever presses them. If the source is no longer there (removed with **Undo** or from another list), the bot says so and redraws the current list.
+- Only the five source types the bot adds are listed. Other blocks of the owner's `sources`, such as `hackernews`, are neither shown nor changed.
 
 KV is eventually consistent: two `/start` messages a few seconds apart may produce two requests. The second approval is reported as "already connected".
 
@@ -70,7 +81,7 @@ KV is eventually consistent: two `/start` messages a few seconds apart may produ
 
 ## Deployment
 
-`.github/workflows/bot-deploy.yml` runs on pushes to `main` that touch `bot/**` and on manual dispatch. It installs the pinned dependencies, runs the tests and the type check, deploys with `wrangler deploy --secrets-file` (the secrets come from the repository secrets above), and registers the webhook with `setWebhook` for `message` and `callback_query` updates.
+`.github/workflows/bot-deploy.yml` runs on pushes to `main` that touch `bot/**` and on manual dispatch. It installs the pinned dependencies, runs the tests and the type check, deploys with `wrangler deploy --secrets-file` (the secrets come from the repository secrets above), registers the webhook with `setWebhook` for `message` and `callback_query` updates, and sets the command menu (`/start`, `/list`, `/help`) with `setMyCommands`.
 
 Check the webhook:
 

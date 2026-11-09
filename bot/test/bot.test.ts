@@ -11,7 +11,7 @@ function setup(existing: number[] = []) {
   const users = new Set(existing);
   const files = new Map<number, Record<string, unknown>>();
   const commits: { id: number; message: string }[] = [];
-  const state = { conflicts: 0, readError: false };
+  const state = { conflicts: 0, readError: false, editError: "" };
   const routes: Record<string, string> = {};
   const github = {
     userExists: vi.fn(async (id: number) => users.has(id)),
@@ -54,7 +54,14 @@ function setup(existing: number[] = []) {
     },
   };
   const deps = {
-    telegram: { call: async (method: string, body: Record<string, unknown>) => void calls.push({ method, body }) },
+    telegram: {
+      call: async (method: string, body: Record<string, unknown>) => {
+        if (method === "editMessageText" && state.editError) {
+          throw new Error(`Telegram editMessageText failed: Bad Request: ${state.editError}`);
+        }
+        calls.push({ method, body });
+      },
+    },
     github,
     kv,
     ownerId: OWNER,
@@ -146,6 +153,7 @@ describe("messages", () => {
       [
         "Команды:",
         "/start — подключиться к Горизонту",
+        "/list — ваши источники",
         "/help — список команд",
         "",
         "Чтобы добавить источник, пришлите ссылку или перешлите пост из канала:",
@@ -293,7 +301,7 @@ describe("adding sources", () => {
         method: "sendMessage",
         body: {
           chat_id: 123,
-          text: "Добавлено: Telegram @durov_news",
+          text: "Добавлено: Telegram @durov_news\nВсе источники — /list",
           reply_markup: { inline_keyboard: [[{ text: "Отменить", callback_data: undoData({ kind: "telegram", channel: "durov_news" }) }]] },
         },
       },
@@ -307,7 +315,7 @@ describe("adding sources", () => {
     });
     expect(bot.files.get(123)).toEqual({ id: 123, sources: { telegram: { channels: [{ channel: "durov_news" }] } } });
     expect(bot.sent(OWNER)).toHaveLength(0);
-    expect(bot.sent(123).map((c) => c.body.text)).toEqual(["Добавлено: Telegram @durov_news"]);
+    expect(bot.sent(123).map((c) => c.body.text)).toEqual(["Добавлено: Telegram @durov_news\nВсе источники — /list"]);
   });
 
   it.each([
@@ -321,7 +329,7 @@ describe("adding sources", () => {
     await bot.run(text(USER, value));
     expect(bot.files.get(123)).toEqual({ id: 123, sources });
     expect(bot.commits).toEqual([{ id: 123, message: `chore(users): add ${kind} source for 123 via bot` }]);
-    expect(lastText(bot)).toBe(`Добавлено: ${label}`);
+    expect(lastText(bot)).toBe(`Добавлено: ${label}\nВсе источники — /list`);
     expect(bot.fetcher).not.toHaveBeenCalled();
   });
 
@@ -331,7 +339,7 @@ describe("adding sources", () => {
     await bot.run(text(USER, "https://blog.example/feed"));
     expect(bot.files.get(123)).toEqual({ id: 123, sources: { rss: [{ name: "Блог", url: "https://blog.example/feed" }] } });
     expect(bot.commits).toEqual([{ id: 123, message: "chore(users): add rss source for 123 via bot" }]);
-    expect(lastText(bot)).toBe("Добавлено: RSS «Блог»");
+    expect(lastText(bot)).toBe("Добавлено: RSS «Блог»\nВсе источники — /list");
   });
 
   it("finds the only feed of a site", async () => {
@@ -372,7 +380,7 @@ describe("adding sources", () => {
       method: "editMessageText",
       body: { chat_id: 123, message_id: 88, text: "На странице несколько фидов. Какой добавить?\n\nВыбран: Комментарии" },
     });
-    expect(lastText(bot)).toBe("Добавлено: RSS «Комментарии блога»");
+    expect(lastText(bot)).toBe("Добавлено: RSS «Комментарии блога»\nВсе источники — /list");
   });
 
   it("undo removes the source with a second commit", async () => {
@@ -433,7 +441,7 @@ describe("adding sources", () => {
     await bot.run(text(USER, "@durov_news"));
     expect(bot.github.readUser).toHaveBeenCalledTimes(2);
     expect(bot.commits).toHaveLength(1);
-    expect(lastText(bot)).toBe("Добавлено: Telegram @durov_news");
+    expect(lastText(bot)).toBe("Добавлено: Telegram @durov_news\nВсе источники — /list");
   });
 });
 
@@ -448,7 +456,7 @@ describe("adding sources: refusals", () => {
     expect(bot.fetcher).not.toHaveBeenCalled();
   });
 
-  it.each(["https://t.me/+AbCdEf", "https://t.me/joinchat/AbCdEf", "javascript:alert(1)", "ftp://example.com/feed", "https://example.com/${OPENAI_API_KEY}", "/list"])(
+  it.each(["https://t.me/+AbCdEf", "https://t.me/joinchat/AbCdEf", "javascript:alert(1)", "ftp://example.com/feed", "https://example.com/${OPENAI_API_KEY}", "/unknown"])(
     "does not understand %s",
     async (value) => {
       const bot = setup([123]);
@@ -519,5 +527,266 @@ describe("adding sources: refusals", () => {
     expect(bot.calls.map((c) => c.body.text)).toEqual(Array(4).fill("Выбор устарел, пришлите ссылку снова."));
     expect(bot.fetcher).not.toHaveBeenCalled();
     expect(bot.commits).toHaveLength(0);
+  });
+});
+
+describe("managing sources", () => {
+  const BLOG: Source = { kind: "rss", name: "Блог", url: "https://blog.example/feed" };
+  const DUROV: Source = { kind: "telegram", channel: "durov_news" };
+  const UV: Source = { kind: "github_repo", owner: "astral-sh", repo: "uv" };
+  const hashOf = (source: Source) => keyHash(sourceKey(source));
+  const sources = () => ({
+    rss: [{ name: "Блог", url: "https://blog.example/feed" }],
+    telegram: { channels: [{ channel: "durov_news", enabled: false }] },
+    github: [{ type: "repo_releases", owner: "astral-sh", repo: "uv" }],
+  });
+  const listMarkup = {
+    inline_keyboard: [
+      [{ text: "✅ RSS «Блог»", callback_data: `src:${hashOf(BLOG)}` }],
+      [{ text: "⏸ Telegram @durov_news", callback_data: `src:${hashOf(DUROV)}` }],
+      [{ text: "✅ GitHub astral-sh/uv (релизы)", callback_data: `src:${hashOf(UV)}` }],
+    ],
+  };
+  const card = (source: Source, label: string, link: string, enabled: boolean) => ({
+    text: `${label}\nСтатус: ${enabled ? "включён" : "выключен"}\n${link}`,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          enabled
+            ? { text: "⏸ Выключить", callback_data: `off:${hashOf(source)}` }
+            : { text: "▶ Включить", callback_data: `on:${hashOf(source)}` },
+          { text: "🗑 Удалить", callback_data: `del:${hashOf(source)}` },
+        ],
+        [{ text: "← К списку", callback_data: "ls" }],
+      ],
+    },
+    link_preview_options: { is_disabled: true },
+  });
+  const BLOG_CARD_ON = card(BLOG, "RSS «Блог»", "https://blog.example/feed", true);
+  const edits = (bot: ReturnType<typeof setup>) =>
+    bot.calls.filter((c) => c.method === "editMessageText").map(({ body: { chat_id: _chat, message_id: _id, ...view } }) => view);
+  const toasts = (bot: ReturnType<typeof setup>) => bot.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body.text);
+  const withSources = () => {
+    const bot = setup([123]);
+    bot.files.set(123, { id: 123, time_window_hours: 6, sources: sources() });
+    return bot;
+  };
+
+  it("lists the sources with their state", async () => {
+    const bot = withSources();
+    await bot.run(text(USER, "/list"));
+    expect(bot.sent(123)).toEqual([{ method: "sendMessage", body: { chat_id: 123, text: "Ваши источники (3 из 20):", reply_markup: listMarkup } }]);
+    expect(bot.github.writeUser).not.toHaveBeenCalled();
+  });
+
+  it.each([{ id: 123 }, { id: 123, sources: { rss: [], telegram: { channels: [] } } }])("says there are no sources in %j", async (file) => {
+    const bot = setup([123]);
+    bot.files.set(123, file);
+    await bot.run(text(USER, "/list"));
+    expect(bot.sent(123)).toEqual([{ method: "sendMessage", body: { chat_id: 123, text: "Источников пока нет. Как добавить — /help." } }]);
+  });
+
+  it("opens a card and goes back to the list without commits", async () => {
+    const bot = withSources();
+    await bot.run(click(`src:${hashOf(BLOG)}`, 123, "Ваши источники (3 из 20):"));
+    await bot.run(click(`src:${hashOf(DUROV)}`, 123, "Ваши источники (3 из 20):"));
+    await bot.run(click("ls", 123, "RSS «Блог»"));
+    expect(edits(bot)).toEqual([
+      BLOG_CARD_ON,
+      card(DUROV, "Telegram @durov_news", "https://t.me/durov_news", false),
+      { text: "Ваши источники (3 из 20):", reply_markup: listMarkup },
+    ]);
+    expect(bot.calls.find((c) => c.method === "editMessageText")?.body).toMatchObject({ chat_id: 123, message_id: 88 });
+    expect(bot.commits).toHaveLength(0);
+  });
+
+  it("turns a source off and on again", async () => {
+    const bot = withSources();
+    await bot.run(click(`off:${hashOf(BLOG)}`));
+    expect(bot.files.get(123)).toEqual({
+      id: 123,
+      time_window_hours: 6,
+      sources: { ...sources(), rss: [{ name: "Блог", url: "https://blog.example/feed", enabled: false }] },
+    });
+    await bot.run(click(`on:${hashOf(BLOG)}`));
+    expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6, sources: sources() });
+    await bot.run(click(`on:${hashOf(DUROV)}`));
+    expect(bot.files.get(123)?.sources).toEqual({ ...sources(), telegram: { channels: [{ channel: "durov_news" }] } });
+    expect(bot.commits.map((c) => c.message)).toEqual([
+      "chore(users): disable rss source for 123 via bot",
+      "chore(users): enable rss source for 123 via bot",
+      "chore(users): enable telegram source for 123 via bot",
+    ]);
+    expect(toasts(bot)).toEqual(["Выключено", "Включено", "Включено"]);
+    expect(edits(bot)).toEqual([
+      card(BLOG, "RSS «Блог»", "https://blog.example/feed", false),
+      BLOG_CARD_ON,
+      card(DUROV, "Telegram @durov_news", "https://t.me/durov_news", true),
+    ]);
+  });
+
+  it("asks before deleting and deletes on confirmation", async () => {
+    const bot = withSources();
+    await bot.run(click(`del:${hashOf(BLOG)}`));
+    await bot.run(click(`src:${hashOf(BLOG)}`));
+    expect(bot.commits).toHaveLength(0);
+    await bot.run(click(`rm:${hashOf(BLOG)}`));
+    expect(bot.files.get(123)?.sources).toEqual({ ...sources(), rss: [] });
+    expect(bot.commits.map((c) => c.message)).toEqual(["chore(users): remove rss source for 123 via bot"]);
+    expect(toasts(bot)).toEqual([undefined, undefined, "Удалено"]);
+    expect(edits(bot)).toEqual([
+      {
+        text: "Удалить RSS «Блог»?",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Да, удалить", callback_data: `rm:${hashOf(BLOG)}` },
+              { text: "Нет", callback_data: `src:${hashOf(BLOG)}` },
+            ],
+          ],
+        },
+      },
+      BLOG_CARD_ON,
+      { text: "Ваши источники (2 из 20):", reply_markup: { inline_keyboard: listMarkup.inline_keyboard.slice(1) } },
+    ]);
+  });
+
+  it("shows an empty list after deleting the last source", async () => {
+    const bot = setup([123]);
+    bot.files.set(123, { id: 123, sources: { telegram: { channels: [{ channel: "durov_news" }] } } });
+    await bot.run(click(`rm:${hashOf(DUROV)}`));
+    expect(edits(bot)).toEqual([{ text: "Источников пока нет. Как добавить — /help." }]);
+  });
+
+  it("touches only the chosen entry in the owner's file", async () => {
+    const bot = setup([OWNER]);
+    const file = {
+      id: OWNER,
+      chat_id: "${TELEGRAM_CHAT_ID}",
+      time_window_hours: 1,
+      sources: {
+        hackernews: { enabled: true },
+        telegram: { channels: [{ channel: "ecotopor" }, { channel: "durov_news" }] },
+        rss: [],
+      },
+    };
+    bot.files.set(OWNER, structuredClone(file));
+    await bot.run(text(OWNER_USER, "/list"));
+    expect(bot.sent(OWNER).at(-1)?.body.reply_markup).toEqual({
+      inline_keyboard: [
+        [{ text: "✅ Telegram @ecotopor", callback_data: `src:${hashOf({ kind: "telegram", channel: "ecotopor" })}` }],
+        [{ text: "✅ Telegram @durov_news", callback_data: `src:${hashOf(DUROV)}` }],
+      ],
+    });
+    await bot.run(click(`off:${hashOf(DUROV)}`, OWNER));
+    expect(bot.files.get(OWNER)).toEqual({
+      ...file,
+      sources: { ...file.sources, telegram: { channels: [{ channel: "ecotopor" }, { channel: "durov_news", enabled: false }] } },
+    });
+    await bot.run(click(`on:${hashOf(DUROV)}`, OWNER));
+    expect(bot.files.get(OWNER)).toEqual(file);
+    await bot.run(click(`rm:${hashOf(DUROV)}`, OWNER));
+    expect(bot.files.get(OWNER)).toEqual({ ...file, sources: { ...file.sources, telegram: { channels: [{ channel: "ecotopor" }] } } });
+  });
+});
+
+describe("managing sources: refusals", () => {
+  const DUROV: Source = { kind: "telegram", channel: "durov_news" };
+  const hash = keyHash(sourceKey(DUROV));
+  const toasts = (bot: ReturnType<typeof setup>) => bot.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body.text);
+  const withDurov = (enabled = true) => {
+    const bot = setup([123, 456]);
+    bot.files.set(123, { id: 123, sources: { telegram: { channels: [enabled ? { channel: "durov_news" } : { channel: "durov_news", enabled: false }] } } });
+    return bot;
+  };
+
+  it("asks a stranger to /start first", async () => {
+    const bot = setup();
+    await bot.run(text(USER, "/list"));
+    await bot.run(click("ls"));
+    await bot.run(click(`off:${hash}`));
+    expect(bot.sent(123).map((c) => c.body.text)).toEqual(["Сначала подключитесь к Горизонту: /start."]);
+    expect(toasts(bot)).toEqual(Array(2).fill("Сначала подключитесь к Горизонту: /start."));
+    expect(bot.github.writeUser).not.toHaveBeenCalled();
+    expect(bot.calls.some((c) => c.method === "editMessageText")).toBe(false);
+  });
+
+  it.each(["off", "on", "rm", "src", "del"])("applies %s only to the presser's own file", async (action) => {
+    const bot = withDurov();
+    await bot.run(click(`${action}:${hash}`, 456));
+    expect(bot.files.get(123)).toEqual({ id: 123, sources: { telegram: { channels: [{ channel: "durov_news" }] } } });
+    expect(bot.github.readUser).toHaveBeenCalledWith(456);
+    expect(bot.github.readUser).not.toHaveBeenCalledWith(123);
+    expect(bot.commits).toHaveLength(0);
+    expect(toasts(bot)).toEqual(["Источника уже нет."]);
+    expect(bot.calls.at(-1)).toEqual({
+      method: "editMessageText",
+      body: { chat_id: 456, message_id: 88, text: "Источников пока нет. Как добавить — /help." },
+    });
+  });
+
+  it.each(["off:zzzzzzzz", "rm:", "ls:00000000", "src:0000000", "del:0000000000", "off:00000000 ", "drop:00000000", "on:ABCDEF12"])(
+    "refuses malformed button data %s from anyone",
+    async (data) => {
+      const bot = withDurov();
+      await bot.run(click(data));
+      expect(bot.calls).toEqual([{ method: "answerCallbackQuery", body: { callback_query_id: "cb2", text: "Некорректная кнопка." } }]);
+      expect(bot.github.readUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refreshes the list on a stale button", async () => {
+    const bot = setup([123]);
+    await bot.run(text(USER, "@durov_news"));
+    await bot.run(click(undoData(DUROV)));
+    await bot.run(click(`off:${hash}`));
+    await bot.run(click(`del:${hash}`));
+    await bot.run(click(`rm:${hash}`));
+    expect(bot.commits).toHaveLength(2);
+    expect(toasts(bot).slice(1)).toEqual(Array(3).fill("Источника уже нет."));
+    expect(bot.calls.filter((c) => c.method === "editMessageText").slice(1).map((c) => c.body.text)).toEqual(
+      Array(3).fill("Источников пока нет. Как добавить — /help."),
+    );
+  });
+
+  it.each([
+    ["off", true, "Выключено"],
+    ["on", false, "Включено"],
+  ])("does not commit %s when the source is already there", async (action, enabled, toast) => {
+    const bot = withDurov(!enabled);
+    bot.state.editError = "message is not modified: specified new message content and reply markup are exactly the same";
+    await bot.run(click(`${action}:${hash}`));
+    expect(bot.commits).toHaveLength(0);
+    expect(toasts(bot)).toEqual([toast]);
+  });
+
+  it("lets other Telegram errors through", async () => {
+    const bot = withDurov();
+    bot.state.editError = "message to edit not found";
+    await expect(bot.run(click(`src:${hash}`))).rejects.toThrow("message to edit not found");
+  });
+
+  it.each([
+    ["two conflicts", (bot: ReturnType<typeof setup>) => void (bot.state.conflicts = 2)],
+    ["a GitHub error", (bot: ReturnType<typeof setup>) => void (bot.state.readError = true)],
+  ])("reports a failed save after %s", async (_name, breakIt) => {
+    const bot = withDurov();
+    for (const action of ["off", "rm"]) {
+      breakIt(bot);
+      await bot.run(click(`${action}:${hash}`));
+    }
+    expect(bot.files.get(123)).toEqual({ id: 123, sources: { telegram: { channels: [{ channel: "durov_news" }] } } });
+    expect(bot.commits).toHaveLength(0);
+    expect(toasts(bot)).toEqual(Array(2).fill("Не удалось сохранить, попробуйте ещё раз."));
+    expect(bot.calls.some((c) => c.method === "editMessageText")).toBe(false);
+  });
+
+  it("reports a failed read", async () => {
+    const bot = withDurov();
+    bot.state.readError = true;
+    await bot.run(text(USER, "/list"));
+    await bot.run(click(`src:${hash}`));
+    expect(lastText(bot)).toBe("Не удалось загрузить источники, попробуйте ещё раз.");
+    expect(toasts(bot)).toEqual(["Не удалось загрузить источники, попробуйте ещё раз."]);
   });
 });

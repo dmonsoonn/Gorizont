@@ -68,3 +68,16 @@ jobs:
             | curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
                 -H "Content-Type: application/json" --data @- \
             | jq -e '.ok == true'
+
+      - name: Set Telegram commands
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          jq -n '{commands: [
+              {command: "start", description: "Подключиться к Горизонту"},
+              {command: "list", description: "Ваши источники"},
+              {command: "help", description: "Список команд"}
+            ]}' \
+            | curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \
+                -H "Content-Type: application/json" --data @- \
+            | jq -e '.ok == true'

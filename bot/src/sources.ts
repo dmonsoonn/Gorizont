@@ -37,18 +37,48 @@ type Entry = Record<string, unknown>;
 interface List {
   path: [string] | [string, string];
   key(entry: Entry): string;
+  source(entry: Entry): Source | null;
+}
+
+export interface Listed {
+  source: Source;
+  enabled: boolean;
+  hash: string;
 }
 
 const lower = (value: unknown) => String(value).toLowerCase();
+const isText = (value: unknown): value is string => typeof value === "string";
 
 const LISTS: List[] = [
-  { path: ["rss"], key: (e) => `rss:${e.url}` },
-  { path: ["telegram", "channels"], key: (e) => `telegram:${lower(e.channel)}` },
-  { path: ["reddit", "subreddits"], key: (e) => `subreddit:${lower(e.subreddit)}` },
-  { path: ["reddit", "users"], key: (e) => `reddit_user:${lower(e.username)}` },
+  {
+    path: ["rss"],
+    key: (e) => `rss:${e.url}`,
+    source: (e) => (isText(e.name) && isText(e.url) ? { kind: "rss", name: e.name, url: e.url } : null),
+  },
+  {
+    path: ["telegram", "channels"],
+    key: (e) => `telegram:${lower(e.channel)}`,
+    source: (e) => (isText(e.channel) ? { kind: "telegram", channel: e.channel } : null),
+  },
+  {
+    path: ["reddit", "subreddits"],
+    key: (e) => `subreddit:${lower(e.subreddit)}`,
+    source: (e) => (isText(e.subreddit) ? { kind: "subreddit", subreddit: e.subreddit } : null),
+  },
+  {
+    path: ["reddit", "users"],
+    key: (e) => `reddit_user:${lower(e.username)}`,
+    source: (e) => (isText(e.username) ? { kind: "reddit_user", username: e.username } : null),
+  },
   {
     path: ["github"],
     key: (e) => (e.type === "repo_releases" ? `github_repo:${lower(e.owner)}/${lower(e.repo)}` : `github_user:${lower(e.username)}`),
+    source: (e) => {
+      if (e.type === "repo_releases" && isText(e.owner) && isText(e.repo)) {
+        return { kind: "github_repo", owner: e.owner, repo: e.repo };
+      }
+      return e.type === "user_events" && isText(e.username) ? { kind: "github_user", username: e.username } : null;
+    },
   },
 ];
 
@@ -181,6 +211,23 @@ export function sourceKey(source: Source): string {
   return list.key(entry);
 }
 
+export function sourceLink(source: Source): string {
+  switch (source.kind) {
+    case "rss":
+      return source.url;
+    case "telegram":
+      return `https://t.me/${source.channel}`;
+    case "subreddit":
+      return `https://www.reddit.com/r/${source.subreddit}`;
+    case "reddit_user":
+      return `https://www.reddit.com/user/${source.username}`;
+    case "github_repo":
+      return `https://github.com/${source.owner}/${source.repo}`;
+    case "github_user":
+      return `https://github.com/${source.username}`;
+  }
+}
+
 export function sourceLabel(source: Source): string {
   switch (source.kind) {
     case "rss":
@@ -255,9 +302,21 @@ export function addSource(data: UserData, source: Source): { data: UserData } | 
   return { data: next };
 }
 
-export function removeSource(data: UserData, hash: string): { data: UserData; kind: string } | null {
-  const next = structuredClone(data);
-  const sources = container(next, "sources", false);
+export function listSources(data: UserData): Listed[] {
+  const sources = container(data, "sources", false);
+  if (!sources) {
+    return [];
+  }
+  return LISTS.flatMap((list) =>
+    entries(sources, list).flatMap((entry) => {
+      const source = list.source(entry);
+      return source ? [{ source, enabled: entry.enabled !== false, hash: keyHash(list.key(entry)) }] : [];
+    }),
+  );
+}
+
+function locate(data: UserData, hash: string): { items: Entry[]; index: number; kind: string } | null {
+  const sources = container(data, "sources", false);
   if (!sources) {
     return null;
   }
@@ -265,10 +324,34 @@ export function removeSource(data: UserData, hash: string): { data: UserData; ki
     const items = entries(sources, list);
     const index = items.findIndex((entry) => keyHash(list.key(entry)) === hash);
     if (index !== -1) {
-      const kind = list.key(items[index]).split(":", 1)[0];
-      items.splice(index, 1);
-      return { data: next, kind };
+      return { items, index, kind: list.key(items[index]).split(":", 1)[0] };
     }
   }
   return null;
+}
+
+export function removeSource(data: UserData, hash: string): { data: UserData; kind: string } | null {
+  const next = structuredClone(data);
+  const found = locate(next, hash);
+  if (!found) {
+    return null;
+  }
+  found.items.splice(found.index, 1);
+  return { data: next, kind: found.kind };
+}
+
+export function setEnabled(data: UserData, hash: string, enabled: boolean): { data: UserData; kind: string; changed: boolean } | null {
+  const next = structuredClone(data);
+  const found = locate(next, hash);
+  if (!found) {
+    return null;
+  }
+  const entry = found.items[found.index];
+  const changed = (entry.enabled !== false) !== enabled;
+  if (enabled) {
+    delete entry.enabled;
+  } else {
+    entry.enabled = false;
+  }
+  return { data: next, kind: found.kind, changed };
 }

@@ -2,13 +2,18 @@ import { discoverFeeds, fetchFeed, type Feed } from "./feeds";
 import { NEW_USER_WINDOW_HOURS, type GitHub } from "./github";
 import {
   addSource,
+  countSources,
   keyHash,
+  listSources,
   MAX_SOURCES,
   parseInput,
   removeSource,
+  setEnabled,
   sourceKey,
   sourceLabel,
+  sourceLink,
   type ForwardOrigin,
+  type Listed,
   type Source,
   type UserData,
 } from "./sources";
@@ -20,12 +25,14 @@ export const FEEDS_TTL_SECONDS = 10 * 60;
 const CALLBACK_PATTERN = /^(approve|reject):([1-9][0-9]{0,14})$/;
 const UNDO_PATTERN = /^undo:([0-9a-f]{8})$/;
 const FEED_PATTERN = /^feed:([0-9a-f]{8}):([0-4])$/;
+const MANAGE_PATTERN = /^(?:ls|(src|off|on|del|rm):([0-9a-f]{8}))$/;
 const COMMAND_PATTERN = /^\/[A-Za-z0-9_]+$/;
-const FEED_BUTTON_LENGTH = 60;
+const BUTTON_LENGTH = 60;
 
 const HELP = [
   "Команды:",
   "/start — подключиться к Горизонту",
+  "/list — ваши источники",
   "/help — список команд",
   "",
   "Чтобы добавить источник, пришлите ссылку или перешлите пост из канала:",
@@ -53,6 +60,10 @@ const CHOICE_EXPIRED = "Выбор устарел, пришлите ссылку
 const STALE_BUTTON = "Кнопка устарела.";
 const SAVE_FAILED = "Не удалось сохранить, попробуйте ещё раз.";
 const LIMIT = `Уже ${MAX_SOURCES} источников, это максимум. Новый не добавлен.`;
+const NO_SOURCES = "Источников пока нет. Как добавить — /help.";
+const READ_FAILED = "Не удалось загрузить источники, попробуйте ещё раз.";
+const SOURCE_GONE = "Источника уже нет.";
+const NOT_MODIFIED = "message is not modified";
 
 export interface User {
   id: number;
@@ -123,6 +134,9 @@ async function handleMessage(message: Message, deps: Deps): Promise<void> {
   if (command === "/help") {
     return reply(HELP);
   }
+  if (command === "/list") {
+    return showList(user.id, deps);
+  }
   if (command !== "/start") {
     return COMMAND_PATTERN.test(command) ? reply(UNKNOWN) : addFromMessage(user.id, text, message.forward_origin, deps);
   }
@@ -164,12 +178,16 @@ async function handleCallback(query: CallbackQuery, deps: Deps): Promise<void> {
   if (choice) {
     return chooseFeed(query, choice[1], Number(choice[2]), deps);
   }
-  if (query.from.id !== deps.ownerId) {
-    return answer(NOT_OWNER);
+  const manage = MANAGE_PATTERN.exec(query.data ?? "");
+  if (manage) {
+    return manageSource(query, (manage[1] ?? "ls") as Action, manage[2] ?? "", deps);
   }
   const match = CALLBACK_PATTERN.exec(query.data ?? "");
   if (!match) {
     return answer(BAD_CALLBACK);
+  }
+  if (query.from.id !== deps.ownerId) {
+    return answer(NOT_OWNER);
   }
   const userId = Number(match[2]);
 
@@ -245,7 +263,7 @@ async function announce(userId: number, source: Source, saved: Saved, deps: Deps
   if (saved === "added") {
     await deps.telegram.call("sendMessage", {
       chat_id: userId,
-      text: `Добавлено: ${label}`,
+      text: `Добавлено: ${label}\nВсе источники — /list`,
       reply_markup: { inline_keyboard: [[{ text: "Отменить", callback_data: `undo:${keyHash(sourceKey(source))}` }]] },
     });
     return;
@@ -284,7 +302,7 @@ async function offerFeeds(userId: number, nonce: string, choices: Feed[], deps: 
     text: CHOOSE_FEED,
     reply_markup: {
       inline_keyboard: choices.map((feed, index) => [
-        { text: Array.from(feed.title).slice(0, FEED_BUTTON_LENGTH).join(""), callback_data: `feed:${nonce}:${index}` },
+        { text: clip(feed.title), callback_data: `feed:${nonce}:${index}` },
       ]),
     },
   });
@@ -329,6 +347,142 @@ async function undoSource(query: CallbackQuery, hash: string, deps: Deps): Promi
   }
   await deps.telegram.call("answerCallbackQuery", { callback_query_id: query.id });
   await markDecision(query, "Отменено", deps);
+}
+
+type Action = "ls" | "src" | "off" | "on" | "del" | "rm";
+
+interface View {
+  text: string;
+  reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] };
+  link_preview_options?: { is_disabled: boolean };
+}
+
+interface Managed {
+  view: View;
+  toast?: string;
+}
+
+async function showList(userId: number, deps: Deps): Promise<void> {
+  let view: View;
+  try {
+    const file = await deps.github.readUser(userId);
+    view = file ? listView(file.data) : { text: NEED_START };
+  } catch (error) {
+    console.error(error);
+    view = { text: READ_FAILED };
+  }
+  await deps.telegram.call("sendMessage", { chat_id: userId, ...view });
+}
+
+async function manageSource(query: CallbackQuery, action: Action, hash: string, deps: Deps): Promise<void> {
+  const userId = query.from.id;
+  const answer = (text?: string) =>
+    deps.telegram.call("answerCallbackQuery", text ? { callback_query_id: query.id, text } : { callback_query_id: query.id });
+  const result = await editUser<Managed>(userId, deps, (data) => applyAction(data, action, hash, userId));
+  if (result === "missing") {
+    return answer(NEED_START);
+  }
+  if (result === "failed") {
+    return answer(action === "off" || action === "on" || action === "rm" ? SAVE_FAILED : READ_FAILED);
+  }
+  await answer(result.toast);
+  await editMessage(query, result.view, deps);
+}
+
+function applyAction(data: UserData, action: Action, hash: string, userId: number): Change<Managed> {
+  const stale: Change<Managed> = { outcome: { view: listView(data), toast: SOURCE_GONE } };
+  if (action === "rm") {
+    const removed = removeSource(data, hash);
+    if (!removed) {
+      return stale;
+    }
+    return {
+      outcome: { view: listView(removed.data), toast: "Удалено" },
+      write: { data: removed.data, message: `chore(users): remove ${removed.kind} source for ${userId} via bot` },
+    };
+  }
+  if (action === "off" || action === "on") {
+    const enabled = action === "on";
+    const updated = setEnabled(data, hash, enabled);
+    const item = updated && listSources(updated.data).find((listed) => listed.hash === hash);
+    if (!updated || !item) {
+      return stale;
+    }
+    const outcome = { view: cardView(item), toast: enabled ? "Включено" : "Выключено" };
+    if (!updated.changed) {
+      return { outcome };
+    }
+    const verb = enabled ? "enable" : "disable";
+    return { outcome, write: { data: updated.data, message: `chore(users): ${verb} ${updated.kind} source for ${userId} via bot` } };
+  }
+  if (action === "ls") {
+    return { outcome: { view: listView(data) } };
+  }
+  const item = listSources(data).find((listed) => listed.hash === hash);
+  if (!item) {
+    return stale;
+  }
+  return { outcome: { view: action === "src" ? cardView(item) : confirmView(item) } };
+}
+
+function listView(data: UserData): View {
+  const items = listSources(data);
+  if (items.length === 0) {
+    return { text: NO_SOURCES };
+  }
+  return {
+    text: `Ваши источники (${countSources(data)} из ${MAX_SOURCES}):`,
+    reply_markup: {
+      inline_keyboard: items.map((item) => [
+        { text: clip(`${item.enabled ? "✅" : "⏸"} ${sourceLabel(item.source)}`), callback_data: `src:${item.hash}` },
+      ]),
+    },
+  };
+}
+
+function cardView(item: Listed): View {
+  const toggle = item.enabled
+    ? { text: "⏸ Выключить", callback_data: `off:${item.hash}` }
+    : { text: "▶ Включить", callback_data: `on:${item.hash}` };
+  return {
+    text: [sourceLabel(item.source), `Статус: ${item.enabled ? "включён" : "выключен"}`, sourceLink(item.source)].join("\n"),
+    reply_markup: {
+      inline_keyboard: [[toggle, { text: "🗑 Удалить", callback_data: `del:${item.hash}` }], [{ text: "← К списку", callback_data: "ls" }]],
+    },
+    link_preview_options: { is_disabled: true },
+  };
+}
+
+function confirmView(item: Listed): View {
+  return {
+    text: `Удалить ${sourceLabel(item.source)}?`,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "Да, удалить", callback_data: `rm:${item.hash}` },
+          { text: "Нет", callback_data: `src:${item.hash}` },
+        ],
+      ],
+    },
+  };
+}
+
+async function editMessage(query: CallbackQuery, view: View, deps: Deps): Promise<void> {
+  if (!query.message) {
+    await deps.telegram.call("sendMessage", { chat_id: query.from.id, ...view });
+    return;
+  }
+  try {
+    await deps.telegram.call("editMessageText", { chat_id: query.message.chat.id, message_id: query.message.message_id, ...view });
+  } catch (error) {
+    if (!String(error).includes(NOT_MODIFIED)) {
+      throw error;
+    }
+  }
+}
+
+function clip(text: string): string {
+  return Array.from(text).slice(0, BUTTON_LENGTH).join("");
 }
 
 async function markDecision(query: CallbackQuery, status: string, deps: Deps): Promise<void> {

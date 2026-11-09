@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { addSource, countSources, keyHash, parseInput, removeSource, sourceKey, sourceLabel, type Source } from "../src/sources";
+import {
+  addSource,
+  countSources,
+  keyHash,
+  listSources,
+  parseInput,
+  removeSource,
+  setEnabled,
+  sourceKey,
+  sourceLabel,
+  sourceLink,
+  type Source,
+} from "../src/sources";
 
 const channel = (name: string) => ({ source: { kind: "telegram", channel: name } });
 
@@ -212,5 +224,109 @@ describe("removeSource", () => {
   it("returns null when nothing matches", () => {
     expect(removeSource({ id: 1 }, "00000000")).toBeNull();
     expect(removeSource({ id: 1, sources: { rss: [] } }, "00000000")).toBeNull();
+  });
+});
+
+const hashOf = (source: Source) => keyHash(sourceKey(source));
+
+describe("listSources", () => {
+  it("lists every whitelisted source in file order with its state and hash", () => {
+    const data = {
+      id: 1,
+      chat_id: "${TELEGRAM_CHAT_ID}",
+      sources: {
+        github: [
+          { type: "user_events", username: "torvalds" },
+          { type: "repo_releases", owner: "astral-sh", repo: "uv", enabled: false },
+        ],
+        reddit: { users: [{ username: "spez" }], subreddits: [{ subreddit: "rust", enabled: true }] },
+        telegram: { channels: [{ channel: "durov_news", enabled: false }, { channel: "other_one" }] },
+        rss: [{ name: "Блог", url: "https://blog.example/feed" }],
+        hackernews: { enabled: true },
+      },
+    };
+    const sources: Source[] = [
+      { kind: "rss", name: "Блог", url: "https://blog.example/feed" },
+      { kind: "telegram", channel: "durov_news" },
+      { kind: "telegram", channel: "other_one" },
+      { kind: "subreddit", subreddit: "rust" },
+      { kind: "reddit_user", username: "spez" },
+      { kind: "github_user", username: "torvalds" },
+      { kind: "github_repo", owner: "astral-sh", repo: "uv" },
+    ];
+    expect(listSources(data)).toEqual(
+      sources.map((source, index) => ({ source, enabled: index !== 1 && index !== 6, hash: hashOf(source) })),
+    );
+  });
+
+  it("is empty without sources", () => {
+    expect(listSources({ id: 1 })).toEqual([]);
+    expect(listSources({ id: 1, sources: { rss: [], hackernews: { enabled: true } } })).toEqual([]);
+  });
+
+  it("skips entries it cannot show", () => {
+    const data = {
+      id: 1,
+      sources: {
+        github: [{ type: "org_events", username: "astral-sh" }, { type: "repo_releases", owner: "astral-sh" }, { type: "user_events", username: "torvalds" }],
+        rss: [{ url: "https://blog.example/feed" }],
+        telegram: { channels: [{ channel: 42 }] },
+      },
+    };
+    expect(listSources(data).map((item) => item.source)).toEqual([{ kind: "github_user", username: "torvalds" }]);
+  });
+});
+
+describe("sourceLink", () => {
+  it.each<[Source, string]>([
+    [{ kind: "rss", name: "Блог", url: "https://blog.example/feed" }, "https://blog.example/feed"],
+    [{ kind: "telegram", channel: "durov_news" }, "https://t.me/durov_news"],
+    [{ kind: "subreddit", subreddit: "rust" }, "https://www.reddit.com/r/rust"],
+    [{ kind: "reddit_user", username: "spez" }, "https://www.reddit.com/user/spez"],
+    [{ kind: "github_repo", owner: "astral-sh", repo: "uv" }, "https://github.com/astral-sh/uv"],
+    [{ kind: "github_user", username: "torvalds" }, "https://github.com/torvalds"],
+  ])("links %j to %s", (source, link) => {
+    expect(sourceLink(source)).toBe(link);
+  });
+});
+
+describe("setEnabled", () => {
+  const owner = {
+    id: 1,
+    chat_id: "${TELEGRAM_CHAT_ID}",
+    sources: {
+      hackernews: { enabled: true },
+      rss: [{ name: "Блог", url: "https://blog.example/feed" }],
+      reddit: { subreddits: [{ subreddit: "rust", enabled: false }] },
+    },
+  };
+  const rss = hashOf({ kind: "rss", name: "Блог", url: "https://blog.example/feed" });
+  const rust = hashOf({ kind: "subreddit", subreddit: "rust" });
+
+  it("turns a source off and keeps everything else", () => {
+    expect(setEnabled(owner, rss, false)).toEqual({
+      kind: "rss",
+      changed: true,
+      data: { ...owner, sources: { ...owner.sources, rss: [{ name: "Блог", url: "https://blog.example/feed", enabled: false }] } },
+    });
+    expect(owner.sources.rss[0]).not.toHaveProperty("enabled");
+  });
+
+  it("turns a source on by dropping the flag", () => {
+    expect(setEnabled(owner, rust, true)).toEqual({
+      kind: "subreddit",
+      changed: true,
+      data: { ...owner, sources: { ...owner.sources, reddit: { subreddits: [{ subreddit: "rust" }] } } },
+    });
+  });
+
+  it("reports no change when the source is already in that state", () => {
+    expect(setEnabled(owner, rss, true)?.changed).toBe(false);
+    expect(setEnabled(owner, rust, false)?.changed).toBe(false);
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(setEnabled(owner, "00000000", false)).toBeNull();
+    expect(setEnabled({ id: 1 }, rss, false)).toBeNull();
   });
 });
