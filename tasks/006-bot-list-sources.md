@@ -1,7 +1,7 @@
 ---
 id: 006
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -80,8 +80,8 @@ reopened: false
 | AC6 | `bot.test.ts` «asks before deleting and deletes on confirmation» (подтверждение и «Нет» без коммитов, «Да» → коммит `remove`, список «2 из 20»), «shows an empty list after deleting the last source» | PASS |
 | AC7 | `bot.test.ts` «touches only the chosen entry in the owner's file» (`chat_id`, `hackernews`, `time_window_hours`, пустой `rss` сохранены; HN не в списке; off → on возвращает исходный файл) | PASS |
 | AC8 | scratchpad `ac8/gen.mts` (`addSource` ×6 → `setEnabled` off/on → `removeSource`, обычный пользователь и владелец с `${TELEGRAM_CHAT_ID}` и `hackernews: true`) → `HORIZON_OWNER_ID=612722019 TELEGRAM_CHAT_ID=-100123 uv run python -c 'load_user…; due_users(d, 6)'`: оба файла ok, выключенные записи `enabled=False` (скраперы их пропускают: `src/scrapers/telegram.py:43`, `reddit.py:62,66`, `rss.py:56`, `github.py:52`), у владельца `chat -100123`, `hn True` сохранён, `due` включает обоих | PASS |
-| AC9 | `bot.test.ts` «answers /help with the command list» (строка `/list`), «adds a Telegram channel with an undo button» и др. («Все источники — /list»); шаг `Set Telegram commands`: YAML разобран (`uv run --with pyyaml`), `jq -n …` выдаёт валидный payload. Меню «/» в живом Telegram — после деплоя | PASS (код); NOT VERIFIED (меню в Telegram, нужен пуш) |
-| AC10 | `npm test` → 221 passed; `npm run typecheck` → ok; `npx wrangler deploy --dry-run` → ok; `uv run pytest` → 1052 passed. CI `bot-deploy.yml` и живой бот — нужен пуш | PASS (локально); NOT VERIFIED (CI, живой бот) |
+| AC9 | `bot.test.ts` «answers /help with the command list» (строка `/list`), «adds a Telegram channel with an undo button» и др. («Все источники — /list»); шаг `Set Telegram commands`: YAML разобран (`uv run --with pyyaml`), `jq -n …` выдаёт валидный payload. CI run 42711674316: шаг `Set Telegram commands` ✓; меню «/» в живом Telegram подтвердил пользователь | PASS |
+| AC10 | `npm test` → 221 passed; `npm run typecheck` → ok; `npx wrangler deploy --dry-run` → ok; `uv run pytest` → 1052 passed. CI `bot-deploy.yml` run 42711674316 — все шаги ✓. Живой бот от владельца 612722019: `/list` и кнопки подтвердил пользователь; коммиты бота (автор «Gorizont bot») `91fb31e` remove, `07624de` disable, `df4b84c` enable; итоговый `data/users/612722019.json` проходит `load_user` (`ecotopor`, `naebnet` включены) | PASS |
 | N1 | `bot.test.ts` «asks a stranger to /start first» (`/list`, `ls`, `off`: `NEED_START`, без записи и правок сообщения) | PASS |
 | N2 | `bot.test.ts` «applies %s only to the presser's own file» (off/on/rm/src/del от 456: читается только файл 456, файл 123 не тронут, «Источника уже нет», список 456) | PASS |
 | N3 | `bot.test.ts` «refuses malformed button data %s from anyone» (8 вводов от не-владельца → «Некорректная кнопка.», `readUser` не вызван); мутация (проверка владельца перед разбором) → 8 тестов падают | PASS |
