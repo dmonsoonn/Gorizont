@@ -9,8 +9,7 @@
           "channel": "ecotopor"
         },
         {
-          "channel": "naebnet",
-          "enabled": false
+          "channel": "naebnet"
         }
       ]
     },
