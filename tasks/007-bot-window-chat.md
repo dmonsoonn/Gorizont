@@ -1,7 +1,7 @@
 ---
 id: 007
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -82,8 +82,8 @@ reopened: false
 | 7 | `bot/test/bot.test.ts` › digest settings › /chat › saves the numeric id of @name / t.me/name / a t.me link; `bot/test/settings.test.ts` › parseChannel | PASS |
 | 8 | `bot/test/bot.test.ts` › digest settings › /chat › shows the channel title and switches back to the private chat; shows the id when the channel title is unavailable | PASS |
 | 9 | `uv run python <scratchpad>/ac9.py`: файлы как пишет бот → `load_user` + `apply_overlay` + `due_users`: окна 12/24/6, `request_body.chat_id` = -100… / id / `${TELEGRAM_CHAT_ID}`→555; час 6 и 18 — только окно 6, час 12 — без окна 24 (перепрогнано 2026-11-10, exit 0) | PASS |
-| 10 | `/help` — тест messages › answers /help…; меню — `bot-deploy.yml` (YAML валиден, `ruby -ryaml`, добавлены `window` и `chat`). Меню в живом боте после деплоя не проверено | PASS (help) / NOT VERIFIED (меню после деплоя) |
-| 11 | `npm test` 294 passed, `npm run typecheck` exit 0, `npx wrangler deploy --dry-run` ок, `uv run pytest` 1052 passed (перепрогнано 2026-11-10). Пуш, `bot-deploy.yml` и живой бот — не сделаны (ждут пуша и проверки владельцем) | PASS (локально) / NOT VERIFIED (CI, живой бот) |
+| 10 | `/help` — тест messages › answers /help…; меню — `bot-deploy.yml` (YAML валиден), шаг `Set Telegram commands` в run 42883387789 вернул `true`; владелец видит в меню «/» `/start`, `/list`, `/window`, `/chat`, `/help` | PASS |
+| 11 | `npm test` 294 passed, `npm run typecheck` exit 0, `npx wrangler deploy --dry-run` ок, `uv run pytest` 1052 passed; `bot-deploy.yml` run 42883387789 зелёный; живой бот от владельца: коммиты `1300eb0` (3h), `1df8480` (6h), `2c7715d` (reset chat), `95308b4` (set chat -1004313458030), `sources` не изменились, файл проходит `load_user`/`apply_overlay`/`due_users` | PASS |
 | N1 | `bot/test/bot.test.ts` › digest settings › refusals › asks a stranger to /start first (ни записи, ни KV) | PASS |
 | N2 | `bot/test/bot.test.ts` › digest settings › refusals › refuses the channel when the user is not an admin | PASS |
 | N3 | `bot/test/bot.test.ts` › digest settings › refusals › refuses the channel when the bot is a member / cannot post / is not in the channel; refuses an unknown channel and a group | PASS |
@@ -97,4 +97,4 @@ reopened: false
 
 - Dead ends: none
 - Decisions: none
-- Known issues: права в канале проверяются только при выборе; если бота позже разжалуют, выпуск упадёт при отправке (сообщение об ошибке — #5).
+- Known issues: права в канале проверяются только при выборе; если бота позже разжалуют, выпуск упадёт при отправке (сообщение об ошибке — #5). Ответ на канал, откуда бота удалили (`403 Forbidden` из Telegram уходит в «Не удалось проверить канал…», а не в «Бот не администратор…»), вживую не проверен.
