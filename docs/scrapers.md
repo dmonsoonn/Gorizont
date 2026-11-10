@@ -94,6 +94,8 @@ Two source types are supported:
 
 Fetches any Atom/RSS feed using the `feedparser` library. Tries multiple date fields (`published`, `updated`, `created`) with fallback parsing.
 
+Up to three feeds are processed concurrently. Feeds with the same configured hostname are processed serially, including rate-limit waits, so queued feeds from one host do not occupy the other concurrency slots. A feed waiting to retry keeps its slot while other active feeds continue; if all three are waiting, queued feeds wait too. Results retain configuration order, and a failed feed does not discard successful feeds.
+
 Feed requests identify Horizon through a `User-Agent` header because some publishers
 reject the HTTP client default. This header is scoped to feed requests and does
 not change the shared client or full-article extractor requests. HTTP errors such
@@ -158,8 +160,8 @@ Subreddits and users are fetched concurrently. Comments are sorted by score, lim
 }
 ```
 
-- `sort` — `hot`, `new`, `top`, or `rising` (subreddits); `hot` or `new` (users)
-- `time_filter` — for `top`/`rising` sorts: `hour`, `day`, `week`, `month`, `year`, `all`
+- `sort` — `hot`, `new`, `top`, `rising`, or `controversial` (subreddits); `hot` or `new` (users)
+- `time_filter` — for `top` and `controversial` sorts: `hour`, `day`, `week`, `month`, `year`, `all`
 - `min_score` — minimum post score (subreddits only)
 - `category` — optional tag for balanced digest grouping; set per subreddit or per user entry
 

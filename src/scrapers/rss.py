@@ -1,5 +1,6 @@
 """RSS feed scraper implementation."""
 
+import asyncio
 import calendar
 import hashlib
 import logging
@@ -20,6 +21,24 @@ logger = logging.getLogger(__name__)
 
 # Identify feed requests: some publishers reject httpx's default User-Agent.
 RSS_USER_AGENT = "Horizon/0.1.0 (+https://github.com/Thysrael/Horizon)"
+MAX_CONCURRENT_FEEDS = 3
+
+# Rate-limited feeds (e.g. Reddit RSS answers bursts with 429) are retried with
+# linear backoff, honouring a numeric Retry-After header up to the cap.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_BACKOFF_SEC = 15.0
+RATE_LIMIT_MAX_WAIT_SEC = 60.0
+
+
+def _rate_limit_delay(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before retry number ``attempt`` (1-based)."""
+    retry_after = response.headers.get("Retry-After", "")
+    try:
+        delay = float(retry_after)
+    except ValueError:
+        delay = RATE_LIMIT_BACKOFF_SEC * attempt
+    return max(0.0, min(delay, RATE_LIMIT_MAX_WAIT_SEC))
+
 
 class RSSScraper(BaseScraper):
     """Scraper for RSS/Atom feeds."""
@@ -50,20 +69,30 @@ class RSSScraper(BaseScraper):
             FetchResult: Items and per-feed failures
         """
         result = FetchResult()
-        sources = self.config["sources"]
+        sources = [source for source in self.config["sources"] if source.enabled]
+        slots = asyncio.Semaphore(MAX_CONCURRENT_FEEDS)
+        host_locks = {source.url.host: asyncio.Lock() for source in sources}
 
-        for source in sources:
-            if not source.enabled:
-                continue
+        async def fetch_source(source: RSSSourceConfig) -> FetchResult:
+            # Wait for the host before occupying a global slot, so queued feeds
+            # from one host cannot prevent other hosts from making progress.
+            async with host_locks[source.url.host], slots:
+                try:
+                    return await self._fetch_feed(source, since)
+                except Exception as exc:
+                    failure = FetchResult()
+                    failure.fail(source.name, exc)
+                    return failure
 
-            try:
-                feed_result = await self._fetch_feed(source, since)
-            except Exception as exc:
-                result.fail(source.name, exc)
-            else:
-                result.items.extend(feed_result.items)
-                result.failures.update(feed_result.failures)
-                result.successful += feed_result.successful
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(fetch_source(source)) for source in sources]
+
+        # Preserve configured feed order regardless of completion order.
+        for task in tasks:
+            feed_result = task.result()
+            result.items.extend(feed_result.items)
+            result.failures.update(feed_result.failures)
+            result.successful += feed_result.successful
 
         return result
 
@@ -87,12 +116,21 @@ class RSSScraper(BaseScraper):
             lambda m: os.environ.get(m.group(1), m.group(0)).strip(),
             str(source.url),
         )
-        response = await safe_request(
-            self.client,
-            "GET",
-            feed_url,
-            headers={"User-Agent": RSS_USER_AGENT},
-        )
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            response = await safe_request(
+                self.client,
+                "GET",
+                feed_url,
+                headers={"User-Agent": RSS_USER_AGENT},
+            )
+            if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+                break
+            delay = _rate_limit_delay(response, attempt + 1)
+            logger.info(
+                "RSS feed %s rate-limited (429); retrying in %.0fs (%d/%d)",
+                source.name, delay, attempt + 1, RATE_LIMIT_RETRIES,
+            )
+            await asyncio.sleep(delay)
         response.raise_for_status()
         feed = feedparser.parse(response.text)
         if feed.bozo and not feed.entries:

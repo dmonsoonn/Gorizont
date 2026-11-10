@@ -14,6 +14,7 @@ from .console_icons import get_icons
 from .logging_config import configure_logging
 from .storage.manager import ConfigError, StorageManager
 from .orchestrator import HorizonOrchestrator
+from .collection_window import collection_hours
 from .models import AIProvider
 from .users import apply_overlay, load_user
 
@@ -37,6 +38,14 @@ def print_banner():
     console.print(banner)
 
 
+def _hours_argument(value: str) -> int:
+    """Parse the CLI override. Positivity is checked later, once, with the config value."""
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from exc
+
+
 def main():
     """Main CLI entry point."""
     configure_logging(console)
@@ -44,7 +53,7 @@ def main():
     icons = get_icons()
 
     parser = argparse.ArgumentParser(description="Horizon - AI-Driven Information Aggregation System")
-    parser.add_argument("--hours", type=int, help="Force fetch from last N hours")
+    parser.add_argument("--hours", type=_hours_argument, help="Force fetch from last N hours")
     parser.add_argument("--user", metavar="TELEGRAM_ID", help="Run for one user from <data-dir>/users/<id>.json")
     add_data_dir_arguments(parser)
     add_log_level_argument(parser)
@@ -110,12 +119,17 @@ def main():
             from .ai.chatgpt_auth import MANAGE_USAGE_URL
             console.print(f"Using ChatGPT plan. Manage usage: {MANAGE_USAGE_URL}")
 
-        # Create and run orchestrator
+        # Config value and CLI override meet here. The orchestrator receives the int.
+        try:
+            window = collection_hours(config.collection.time_window_hours, args.hours)
+        except ValueError as exc:
+            console.print(f"[bold red]{icons['error']} {exc}[/bold red]")
+            sys.exit(2)
+
         orchestrator = HorizonOrchestrator(
             config, storage, console=console, publish_site=user is None or user.publish_site
         )
-        force_hours = args.hours or (user.time_window_hours if user else None)
-        asyncio.run(orchestrator.run(force_hours=force_hours))
+        asyncio.run(orchestrator.run(force_hours=window))
 
     except KeyboardInterrupt:
         console.print(f"\n[yellow]{icons['warning']} Interrupted by user[/yellow]")

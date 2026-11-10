@@ -14,6 +14,7 @@ from src.models import (
     ProcessingResult,
     SourceType,
 )
+from src.ai.enricher import EnrichmentBatchResult
 from src.orchestrator import HorizonOrchestrator
 from src.storage.manager import ConfigError, StorageManager
 from src.users import UserConfig, apply_overlay, due_users, load_user
@@ -458,7 +459,7 @@ def test_main_without_user_is_unchanged(monkeypatch, tmp_path):
 
     assert rss_names(call["config"]) == ["Base"]
     assert call["config"].webhook.request_body["chat_id"] == "@base"
-    assert call["force_hours"] is None
+    assert call["force_hours"] == 24
     assert call["publish_site"] is True
 
 
@@ -509,12 +510,15 @@ def run_orchestrator(monkeypatch, tmp_path, publish_site: bool) -> None:
     async def nothing(items):
         return None
 
+    async def enriched(items):
+        return EnrichmentBatchResult()
+
     monkeypatch.setattr(orchestrator_module, "DailySummarizer", FakeSummarizer)
     monkeypatch.setattr(orchestrator, "fetch_all_sources", fetch_all_sources)
     monkeypatch.setattr(orchestrator, "analyze_items", passthrough)
     monkeypatch.setattr(orchestrator, "merge_topic_duplicates", passthrough)
     monkeypatch.setattr(orchestrator, "_expand_twitter_discussion", nothing)
-    monkeypatch.setattr(orchestrator, "enrich_items", nothing)
+    monkeypatch.setattr(orchestrator, "enrich_items", enriched)
     monkeypatch.chdir(tmp_path)
 
     asyncio.run(orchestrator.run())
