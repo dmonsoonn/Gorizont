@@ -1,6 +1,5 @@
 {
   "id": 612722019,
-  "chat_id": "${TELEGRAM_CHAT_ID}",
   "time_window_hours": 6,
   "sources": {
     "telegram": {
