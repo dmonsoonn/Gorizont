@@ -1,7 +1,6 @@
 {
   "id": 612722019,
-  "chat_id": "${TELEGRAM_CHAT_ID}",
-  "time_window_hours": 1,
+  "time_window_hours": 6,
   "sources": {
     "telegram": {
       "channels": [
@@ -14,5 +13,6 @@
       ]
     },
     "rss": []
-  }
+  },
+  "chat_id": -1004313458030
 }
