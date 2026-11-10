@@ -1,9 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { feedsKey, FEEDS_TTL_SECONDS, handleUpdate, pendingKey, rejectedKey, PENDING_TTL_SECONDS, type Store, type Update } from "../src/bot";
+import {
+  channelKey,
+  CHANNEL_TTL_SECONDS,
+  feedsKey,
+  FEEDS_TTL_SECONDS,
+  handleUpdate,
+  pendingKey,
+  rejectedKey,
+  PENDING_TTL_SECONDS,
+  type Store,
+  type Update,
+} from "../src/bot";
 import { keyHash, sourceKey, type Source } from "../src/sources";
 import type { GitHub } from "../src/github";
 
 const OWNER = 612722019;
+const BOT_ID = 999;
 const USER = { id: 123, first_name: "Вася", last_name: "Пупкин", username: "vasya" };
 
 function setup(existing: number[] = []) {
@@ -11,8 +23,10 @@ function setup(existing: number[] = []) {
   const users = new Set(existing);
   const files = new Map<number, Record<string, unknown>>();
   const commits: { id: number; message: string }[] = [];
-  const state = { conflicts: 0, readError: false, editError: "" };
+  const state = { conflicts: 0, readError: false, editError: "", requestError: "" };
   const routes: Record<string, string> = {};
+  const chats = new Map<string, { id: number; type: string; title?: string; username?: string }>();
+  const members = new Map<string, { status: string; can_post_messages?: boolean }>();
   const github = {
     userExists: vi.fn(async (id: number) => users.has(id)),
     createUser: vi.fn(async (id: number): Promise<"created" | "exists"> => {
@@ -61,6 +75,27 @@ function setup(existing: number[] = []) {
         }
         calls.push({ method, body });
       },
+      request: async (method: string, body: Record<string, unknown>) => {
+        calls.push({ method, body });
+        if (state.requestError) {
+          throw new Error(`Telegram ${method} failed: ${state.requestError}`);
+        }
+        if (method === "getMe") {
+          return { id: BOT_ID, is_bot: true, first_name: "Gorizont" };
+        }
+        const chat = chats.get(String(body.chat_id));
+        if (!chat) {
+          throw new Error(`Telegram ${method} failed: Bad Request: chat not found`);
+        }
+        if (method === "getChat") {
+          return chat;
+        }
+        const member = members.get(`${chat.id}:${String(body.user_id)}`);
+        if (!member) {
+          throw new Error(`Telegram ${method} failed: Bad Request: user not found`);
+        }
+        return member;
+      },
     },
     github,
     kv,
@@ -69,7 +104,7 @@ function setup(existing: number[] = []) {
   };
   const run = (update: Update) => handleUpdate(update, deps);
   const sent = (chatId: number) => calls.filter((c) => c.method === "sendMessage" && c.body.chat_id === chatId);
-  return { calls, users, files, commits, state, routes, fetcher, github, values, ttls, run, sent };
+  return { calls, users, files, commits, state, routes, chats, members, fetcher, github, values, ttls, run, sent };
 }
 
 function text(from: typeof USER, value: string, chatType = "private"): Update {
@@ -154,6 +189,8 @@ describe("messages", () => {
         "Команды:",
         "/start — подключиться к Горизонту",
         "/list — ваши источники",
+        "/window — как часто приходит дайджест",
+        "/chat — куда приходит дайджест",
         "/help — список команд",
         "",
         "Чтобы добавить источник, пришлите ссылку или перешлите пост из канала:",
@@ -788,5 +825,318 @@ describe("managing sources: refusals", () => {
     await bot.run(click(`src:${hash}`));
     expect(lastText(bot)).toBe("Не удалось загрузить источники, попробуйте ещё раз.");
     expect(toasts(bot)).toEqual(["Не удалось загрузить источники, попробуйте ещё раз."]);
+  });
+});
+
+describe("digest settings", () => {
+  const CHANNEL = { id: -1001234567890, type: "channel", title: "Мой канал", username: "my_chan" };
+  const SECRET = { id: -1009876543210, type: "channel", title: "Закрытый" };
+  const ADMIN_BOT = { status: "administrator", can_post_messages: true };
+  const PROMPT = "Перешлите пост из канала или пришлите @имя / ссылку t.me/имя. Бот должен быть администратором канала с правом публикации.";
+  const NOT_CHANNEL = "Это не канал. Перешлите пост из канала или пришлите @имя / ссылку t.me/имя. Отменить — любая команда.";
+  const chatMarkup = {
+    inline_keyboard: [
+      [
+        { text: "В канал", callback_data: "chat:channel" },
+        { text: "В личный чат", callback_data: "chat:private" },
+      ],
+    ],
+  };
+  const windowMarkup = (labels: string[]) => ({
+    inline_keyboard: [labels.map((label, index) => ({ text: label, callback_data: `win:${[3, 6, 12, 24][index]}` }))],
+  });
+  const toasts = (bot: ReturnType<typeof setup>) => bot.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body.text);
+  const edits = (bot: ReturnType<typeof setup>) =>
+    bot.calls.filter((c) => c.method === "editMessageText").map(({ body: { chat_id: _chat, message_id: _id, ...view } }) => view);
+  const user = (file: Record<string, unknown> = { id: 123, time_window_hours: 6 }) => {
+    const bot = setup([123]);
+    bot.files.set(123, file);
+    return bot;
+  };
+  const addChannel = (
+    bot: ReturnType<typeof setup>,
+    chat: { id: number; type: string; title?: string; username?: string } = CHANNEL,
+    botMember: { status: string; can_post_messages?: boolean } | null = ADMIN_BOT,
+    userMember: { status: string } | null = { status: "creator" },
+  ) => {
+    bot.chats.set(String(chat.id), chat);
+    if (chat.username) {
+      bot.chats.set(`@${chat.username}`, chat);
+    }
+    if (botMember) {
+      bot.members.set(`${chat.id}:${BOT_ID}`, botMember);
+    }
+    if (userMember) {
+      bot.members.set(`${chat.id}:123`, userMember);
+    }
+  };
+  const forward = (chat: { id: number; type?: string; title?: string; username?: string }, type = "channel"): Update => ({
+    message: { message_id: 5, chat: { id: 123, type: "private" }, from: USER, forward_origin: { type, chat } },
+  });
+  const waiting = (bot: ReturnType<typeof setup>) => bot.run(click("chat:channel"));
+
+  describe("/window", () => {
+    it("shows the current window with a check mark", async () => {
+      const bot = user();
+      await bot.run(text(USER, "/window"));
+      expect(bot.sent(123).map((c) => c.body)).toEqual([
+        { chat_id: 123, text: "Дайджест приходит раз в 6 ч.", reply_markup: windowMarkup(["3 ч", "✓ 6 ч", "12 ч", "24 ч"]) },
+      ]);
+    });
+
+    it("saves a new window once and redraws the message", async () => {
+      const bot = user({ id: 123, time_window_hours: 6, sources: { rss: [] } });
+      await bot.run(click("win:12"));
+      await bot.run(click("win:12"));
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 12, sources: { rss: [] } });
+      expect(bot.commits).toEqual([{ id: 123, message: "chore(users): set window 12h for 123 via bot" }]);
+      expect(toasts(bot)).toEqual(["Сохранено", "Сохранено"]);
+      expect(edits(bot).at(-1)).toEqual({ text: "Дайджест приходит раз в 12 ч.", reply_markup: windowMarkup(["3 ч", "6 ч", "✓ 12 ч", "24 ч"]) });
+    });
+
+    it("shows the default window of a file without the key", async () => {
+      const bot = user({ id: 123 });
+      await bot.run(text(USER, "/window"));
+      expect(lastText(bot)).toBe("Дайджест приходит раз в 1 ч.");
+    });
+  });
+
+  describe("owner's file", () => {
+    const OWNER_USER = { id: OWNER, first_name: "Owner", last_name: "", username: "" };
+    const ownerFile = () => ({
+      id: OWNER,
+      chat_id: "${TELEGRAM_CHAT_ID}",
+      time_window_hours: 1,
+      sources: { hackernews: { enabled: true }, telegram: { channels: [{ channel: "ecotopor" }] }, rss: [] },
+    });
+
+    it("shows the window and the chat as they are and changes only the window", async () => {
+      const bot = setup([OWNER]);
+      bot.files.set(OWNER, ownerFile());
+      await bot.run(text(OWNER_USER, "/window"));
+      await bot.run(text(OWNER_USER, "/chat"));
+      expect(bot.sent(OWNER).map((c) => c.body)).toEqual([
+        { chat_id: OWNER, text: "Дайджест приходит раз в 1 ч.", reply_markup: windowMarkup(["3 ч", "6 ч", "12 ч", "24 ч"]) },
+        { chat_id: OWNER, text: "Дайджест приходит: задан в конфиге", reply_markup: chatMarkup },
+      ]);
+      expect(bot.calls.some((c) => c.method === "getChat")).toBe(false);
+
+      await bot.run(click("win:24", OWNER));
+      expect(JSON.stringify(bot.files.get(OWNER))).toBe(JSON.stringify({ ...ownerFile(), time_window_hours: 24 }));
+      expect(bot.commits).toEqual([{ id: OWNER, message: `chore(users): set window 24h for ${OWNER} via bot` }]);
+    });
+  });
+
+  describe("/chat", () => {
+    it("shows the private chat and does not commit when it is already there", async () => {
+      const bot = user();
+      await bot.run(text(USER, "/chat"));
+      await bot.run(click("chat:private"));
+      expect(bot.sent(123).map((c) => c.body)).toEqual([{ chat_id: 123, text: "Дайджест приходит: в личный чат", reply_markup: chatMarkup }]);
+      expect(bot.commits).toHaveLength(0);
+      expect(toasts(bot)).toEqual(["Сохранено"]);
+    });
+
+    it("treats chat_id equal to the user id as the private chat", async () => {
+      const bot = user({ id: 123, chat_id: 123 });
+      await bot.run(text(USER, "/chat"));
+      expect(lastText(bot)).toBe("Дайджест приходит: в личный чат");
+    });
+
+    it.each([
+      ["a public channel forward", forward({ id: CHANNEL.id, title: CHANNEL.title, username: CHANNEL.username }), CHANNEL],
+      ["a private channel forward", forward({ id: SECRET.id, title: SECRET.title }), SECRET],
+      ["@name", text(USER, "@my_chan"), CHANNEL],
+      ["t.me/name", text(USER, "t.me/my_chan"), CHANNEL],
+      ["a t.me link", text(USER, "https://t.me/my_chan"), CHANNEL],
+    ])("saves the numeric id of %s", async (_name, update, chat) => {
+      const bot = user();
+      addChannel(bot, chat);
+      await waiting(bot);
+      expect(bot.values.get(channelKey(123))).toBe("1");
+      expect(bot.ttls.get(channelKey(123))).toBe(CHANNEL_TTL_SECONDS);
+      expect(edits(bot)).toEqual([{ text: PROMPT, reply_markup: { inline_keyboard: [[{ text: "Отмена", callback_data: "chat:cancel" }]] } }]);
+
+      await bot.run(update);
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6, chat_id: chat.id });
+      expect(bot.commits).toEqual([{ id: 123, message: "chore(users): set chat for 123 via bot" }]);
+      expect(bot.values.has(channelKey(123))).toBe(false);
+      expect(lastText(bot)).toBe(`Дайджест будет приходить в канал «${chat.title}».`);
+      expect(bot.calls.filter((c) => c.method === "sendMessage" && c.body.chat_id !== 123)).toHaveLength(0);
+    });
+
+    it("shows the channel title and switches back to the private chat", async () => {
+      const bot = user({ id: 123, chat_id: CHANNEL.id, time_window_hours: 6 });
+      addChannel(bot);
+      await bot.run(text(USER, "/chat"));
+      expect(lastText(bot)).toBe("Дайджест приходит: в канал «Мой канал»");
+
+      await bot.run(click("chat:private"));
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6 });
+      expect(bot.commits).toEqual([{ id: 123, message: "chore(users): reset chat for 123 via bot" }]);
+      expect(edits(bot)).toEqual([{ text: "Дайджест приходит: в личный чат", reply_markup: chatMarkup }]);
+    });
+
+    it("shows the id when the channel title is unavailable", async () => {
+      const bot = user({ id: 123, chat_id: CHANNEL.id });
+      await bot.run(text(USER, "/chat"));
+      expect(lastText(bot)).toBe(`Дайджест приходит: в канал ${CHANNEL.id}`);
+    });
+  });
+
+  describe("refusals", () => {
+    it("asks a stranger to /start first", async () => {
+      const bot = setup();
+      await bot.run(text(USER, "/window"));
+      await bot.run(text(USER, "/chat"));
+      for (const data of ["win:12", "chat:channel", "chat:private"]) {
+        await bot.run(click(data));
+      }
+      expect(bot.sent(123).map((c) => c.body.text)).toEqual(Array(2).fill("Сначала подключитесь к Горизонту: /start."));
+      expect(toasts(bot)).toEqual(Array(3).fill("Сначала подключитесь к Горизонту: /start."));
+      expect(bot.github.writeUser).not.toHaveBeenCalled();
+      expect(bot.values.size).toBe(0);
+    });
+
+    it.each([
+      ["the user is not an admin", ADMIN_BOT, { status: "member" }, "Вы не администратор этого канала."],
+      ["the bot is a member", { status: "member" }, { status: "creator" }, "Бот не администратор канала или не может публиковать. Добавьте бота в администраторы с правом публикации и пришлите канал снова."],
+      ["the bot cannot post", { status: "administrator", can_post_messages: false }, { status: "creator" }, "Бот не администратор канала или не может публиковать. Добавьте бота в администраторы с правом публикации и пришлите канал снова."],
+      ["the bot has left the channel", { status: "left" }, { status: "creator" }, "Бот не администратор канала или не может публиковать. Добавьте бота в администраторы с правом публикации и пришлите канал снова."],
+      ["the bot is not in the channel", null, { status: "creator" }, "Бот не администратор канала или не может публиковать. Добавьте бота в администраторы с правом публикации и пришлите канал снова."],
+      ["the user is not in the channel", ADMIN_BOT, null, "Вы не администратор этого канала."],
+    ])("refuses the channel when %s", async (_name, botMember, userMember, reply) => {
+      const bot = user();
+      addChannel(bot, CHANNEL, botMember, userMember);
+      await waiting(bot);
+      await bot.run(text(USER, "@my_chan"));
+      expect(lastText(bot)).toBe(reply);
+      expect(bot.commits).toHaveLength(0);
+      expect(bot.values.get(channelKey(123))).toBe("1");
+    });
+
+    it.each(["Too Many Requests: retry after 5", "Internal Server Error"])("asks to retry when Telegram answers %s", async (error) => {
+      const bot = user();
+      addChannel(bot);
+      await waiting(bot);
+      bot.state.requestError = error;
+      await bot.run(text(USER, "@my_chan"));
+      expect(lastText(bot)).toBe("Не удалось проверить канал, попробуйте ещё раз.");
+      expect(bot.commits).toHaveLength(0);
+      expect(bot.values.get(channelKey(123))).toBe("1");
+    });
+
+    it("refuses a chat without a numeric id", async () => {
+      const bot = user();
+      bot.chats.set("@broken_chan", { id: Number.NaN, type: "channel" });
+      bot.chats.get("@broken_chan")!.id = "x" as unknown as number;
+      await waiting(bot);
+      await bot.run(text(USER, "@broken_chan"));
+      expect(lastText(bot)).toBe("Канал не найден. Проверьте имя или перешлите пост из канала.");
+      expect(bot.commits).toHaveLength(0);
+    });
+
+    it("refuses an unknown channel and a group", async () => {
+      const bot = user();
+      addChannel(bot, { id: -100555, type: "supergroup", title: "Группа", username: "some_group" });
+      await waiting(bot);
+      await bot.run(text(USER, "@nobody_here"));
+      await bot.run(text(USER, "@some_group"));
+      expect(bot.sent(123).map((c) => c.body.text)).toEqual(["Канал не найден. Проверьте имя или перешлите пост из канала.", NOT_CHANNEL]);
+      expect(bot.commits).toHaveLength(0);
+    });
+
+    it("changes only the presser's file", async () => {
+      const bot = setup([123, 456]);
+      bot.files.set(123, { id: 123, time_window_hours: 6 });
+      await bot.run({
+        callback_query: { id: "cb3", from: { id: 456, first_name: "Чужой" }, data: "win:24", message: { message_id: 9, chat: { id: 123, type: "private" }, text: "x" } },
+      });
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6 });
+      expect(bot.commits).toEqual([{ id: 456, message: "chore(users): set window 24h for 456 via bot" }]);
+    });
+
+    it.each(["win:5", "win:12x", "win:", "win:012", "chat:", "chat:foo", "chat:private ", "chat:channel:123"])(
+      "refuses malformed button data %s",
+      async (data) => {
+        const bot = user();
+        await bot.run(click(data));
+        expect(bot.calls).toEqual([{ method: "answerCallbackQuery", body: { callback_query_id: "cb2", text: "Некорректная кнопка." } }]);
+        expect(bot.github.readUser).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["${TELEGRAM_CHAT_ID}", "@abc", `@${"a".repeat(40)}`, "https://blog.example/", "привет", "@my_chan ${X}"])(
+      "answers %s with 'not a channel' without network calls",
+      async (value) => {
+        const bot = user();
+        await waiting(bot);
+        await bot.run(text(USER, value));
+        expect(lastText(bot)).toBe(NOT_CHANNEL);
+        expect(bot.calls.some((c) => c.method.startsWith("get"))).toBe(false);
+        expect(bot.fetcher).not.toHaveBeenCalled();
+        expect(bot.commits).toHaveLength(0);
+        expect(bot.values.get(channelKey(123))).toBe("1");
+      },
+    );
+
+    it.each([
+      ["a user", forward({ id: 77 }, "user")],
+      ["a group", forward({ id: -100555, title: "Группа" }, "chat")],
+    ])("answers a forward from %s with 'not a channel'", async (_name, update) => {
+      const bot = user();
+      await waiting(bot);
+      await bot.run(update);
+      expect(lastText(bot)).toBe(NOT_CHANNEL);
+      expect(bot.commits).toHaveLength(0);
+    });
+
+    it("drops the waiting state on a command and runs the command", async () => {
+      const bot = user();
+      await waiting(bot);
+      await bot.run(text(USER, "/list"));
+      expect(bot.values.has(channelKey(123))).toBe(false);
+      expect(lastText(bot)).toBe("Источников пока нет. Как добавить — /help.");
+    });
+
+    it("adds sources again after cancel", async () => {
+      const bot = user();
+      addChannel(bot);
+      await waiting(bot);
+      await bot.run(click("chat:cancel"));
+      expect(bot.values.has(channelKey(123))).toBe(false);
+      expect(edits(bot).at(-1)).toEqual({ text: "Выбор канала отменён." });
+
+      await bot.run(forward({ id: CHANNEL.id, title: CHANNEL.title, username: CHANNEL.username }));
+      expect(bot.commits).toEqual([{ id: 123, message: "chore(users): add telegram source for 123 via bot" }]);
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6, sources: { telegram: { channels: [{ channel: "my_chan" }] } } });
+    });
+
+    it.each([
+      ["two conflicts", (bot: ReturnType<typeof setup>) => void (bot.state.conflicts = 2)],
+      ["a GitHub error", (bot: ReturnType<typeof setup>) => void (bot.state.readError = true)],
+    ])("reports a failed save after %s", async (_name, breakIt) => {
+      const bot = user({ id: 123, time_window_hours: 6, chat_id: SECRET.id });
+      addChannel(bot);
+      await waiting(bot);
+      breakIt(bot);
+      await bot.run(text(USER, "@my_chan"));
+      breakIt(bot);
+      await bot.run(click("win:12"));
+      breakIt(bot);
+      await bot.run(click("chat:private"));
+      expect(bot.files.get(123)).toEqual({ id: 123, time_window_hours: 6, chat_id: SECRET.id });
+      expect(bot.commits).toHaveLength(0);
+      expect(lastText(bot)).toBe("Не удалось сохранить, попробуйте ещё раз.");
+      expect(toasts(bot).slice(1)).toEqual(Array(2).fill("Не удалось сохранить, попробуйте ещё раз."));
+    });
+
+    it("reports a failed read", async () => {
+      const bot = user();
+      bot.state.readError = true;
+      await bot.run(text(USER, "/window"));
+      await bot.run(text(USER, "/chat"));
+      expect(bot.sent(123).map((c) => c.body.text)).toEqual(Array(2).fill("Не удалось загрузить настройки, попробуйте ещё раз."));
+    });
   });
 });

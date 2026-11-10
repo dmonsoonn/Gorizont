@@ -17,15 +17,19 @@ import {
   type Source,
   type UserData,
 } from "./sources";
+import { chatTarget, parseChannel, resetChat, setChat, setWindow, WINDOWS, windowOf } from "./settings";
 import type { Telegram } from "./telegram";
 
 export const PENDING_TTL_SECONDS = 24 * 60 * 60;
 export const FEEDS_TTL_SECONDS = 10 * 60;
+export const CHANNEL_TTL_SECONDS = 10 * 60;
 
 const CALLBACK_PATTERN = /^(approve|reject):([1-9][0-9]{0,14})$/;
 const UNDO_PATTERN = /^undo:([0-9a-f]{8})$/;
 const FEED_PATTERN = /^feed:([0-9a-f]{8}):([0-4])$/;
 const MANAGE_PATTERN = /^(?:ls|(src|off|on|del|rm):([0-9a-f]{8}))$/;
+const WINDOW_PATTERN = /^win:(3|6|12|24)$/;
+const CHAT_PATTERN = /^chat:(channel|private|cancel)$/;
 const COMMAND_PATTERN = /^\/[A-Za-z0-9_]+$/;
 const BUTTON_LENGTH = 60;
 
@@ -33,6 +37,8 @@ const HELP = [
   "Команды:",
   "/start — подключиться к Горизонту",
   "/list — ваши источники",
+  "/window — как часто приходит дайджест",
+  "/chat — куда приходит дайджест",
   "/help — список команд",
   "",
   "Чтобы добавить источник, пришлите ссылку или перешлите пост из канала:",
@@ -64,6 +70,17 @@ const NO_SOURCES = "Источников пока нет. Как добавит�
 const READ_FAILED = "Не удалось загрузить источники, попробуйте ещё раз.";
 const SOURCE_GONE = "Источника уже нет.";
 const NOT_MODIFIED = "message is not modified";
+const SAVED = "Сохранено";
+const SETTINGS_READ_FAILED = "Не удалось загрузить настройки, попробуйте ещё раз.";
+const PRIVATE_CHAT = "в личный чат";
+const CHANNEL_PROMPT = "Перешлите пост из канала или пришлите @имя / ссылку t.me/имя. Бот должен быть администратором канала с правом публикации.";
+const NOT_CHANNEL = "Это не канал. Перешлите пост из канала или пришлите @имя / ссылку t.me/имя. Отменить — любая команда.";
+const CHANNEL_NOT_FOUND = "Канал не найден. Проверьте имя или перешлите пост из канала.";
+const BOT_NOT_ADMIN = "Бот не администратор канала или не может публиковать. Добавьте бота в администраторы с правом публикации и пришлите канал снова.";
+const NOT_CHANNEL_ADMIN = "Вы не администратор этого канала.";
+const CHANNEL_CANCELLED = "Выбор канала отменён.";
+const CHECK_FAILED = "Не удалось проверить канал, попробуйте ещё раз.";
+const BAD_REQUEST = "Bad Request";
 
 export interface User {
   id: number;
@@ -110,6 +127,7 @@ export interface Deps {
 export const pendingKey = (id: number) => `pending:${id}`;
 export const rejectedKey = (id: number) => `rejected:${id}`;
 export const feedsKey = (id: number) => `feeds:${id}`;
+export const channelKey = (id: number) => `chat:${id}`;
 
 export async function handleUpdate(update: Update, deps: Deps): Promise<void> {
   if (update.message) {
@@ -126,16 +144,29 @@ async function handleMessage(message: Message, deps: Deps): Promise<void> {
   const user = message.from;
   const reply = (text: string) => deps.telegram.call("sendMessage", { chat_id: message.chat.id, text });
   const text = message.text ?? message.caption ?? "";
+  const command = text.split(/\s/, 1)[0].split("@", 1)[0];
+  const isCommand = !message.forward_origin && COMMAND_PATTERN.test(command);
+  if ((await deps.kv.get(channelKey(user.id))) !== null) {
+    if (!isCommand) {
+      return pickChannel(user.id, text, message.forward_origin, deps);
+    }
+    await deps.kv.delete(channelKey(user.id));
+  }
   if (message.forward_origin) {
     return addFromMessage(user.id, text, message.forward_origin, deps);
   }
-  const command = text.split(/\s/, 1)[0].split("@", 1)[0];
 
   if (command === "/help") {
     return reply(HELP);
   }
   if (command === "/list") {
     return showList(user.id, deps);
+  }
+  if (command === "/window") {
+    return showSetting(user.id, deps, async (data) => windowView(data));
+  }
+  if (command === "/chat") {
+    return showSetting(user.id, deps, async (data) => chatView(await chatLabel(data, deps)));
   }
   if (command !== "/start") {
     return COMMAND_PATTERN.test(command) ? reply(UNKNOWN) : addFromMessage(user.id, text, message.forward_origin, deps);
@@ -181,6 +212,14 @@ async function handleCallback(query: CallbackQuery, deps: Deps): Promise<void> {
   const manage = MANAGE_PATTERN.exec(query.data ?? "");
   if (manage) {
     return manageSource(query, (manage[1] ?? "ls") as Action, manage[2] ?? "", deps);
+  }
+  const hours = WINDOW_PATTERN.exec(query.data ?? "");
+  if (hours) {
+    return chooseWindow(query, Number(hours[1]), deps);
+  }
+  const chat = CHAT_PATTERN.exec(query.data ?? "");
+  if (chat) {
+    return chooseChat(query, chat[1] as ChatAction, deps);
   }
   const match = CALLBACK_PATTERN.exec(query.data ?? "");
   if (!match) {
@@ -479,6 +518,188 @@ async function editMessage(query: CallbackQuery, view: View, deps: Deps): Promis
       throw error;
     }
   }
+}
+
+interface ChatInfo {
+  id: number;
+  type: string;
+  title?: string;
+}
+
+interface Member {
+  status: string;
+  can_post_messages?: boolean;
+}
+
+type ChatAction = "channel" | "private" | "cancel";
+
+async function showSetting(userId: number, deps: Deps, render: (data: UserData) => Promise<View>): Promise<void> {
+  let view: View;
+  try {
+    const file = await deps.github.readUser(userId);
+    view = file ? await render(file.data) : { text: NEED_START };
+  } catch (error) {
+    console.error(error);
+    view = { text: SETTINGS_READ_FAILED };
+  }
+  await deps.telegram.call("sendMessage", { chat_id: userId, ...view });
+}
+
+function windowView(data: UserData): View {
+  const current = windowOf(data);
+  return {
+    text: `Дайджест приходит раз в ${String(current)} ч.`,
+    reply_markup: {
+      inline_keyboard: [WINDOWS.map((hours) => ({ text: `${hours === current ? "✓ " : ""}${hours} ч`, callback_data: `win:${hours}` }))],
+    },
+  };
+}
+
+function chatView(label: string): View {
+  return {
+    text: `Дайджест приходит: ${label}`,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "В канал", callback_data: "chat:channel" },
+          { text: "В личный чат", callback_data: "chat:private" },
+        ],
+      ],
+    },
+  };
+}
+
+function channelName(chat: ChatInfo): string {
+  return chat.title ? `«${chat.title}»` : String(chat.id);
+}
+
+async function chatLabel(data: UserData, deps: Deps): Promise<string> {
+  const target = chatTarget(data);
+  if (target === "private") {
+    return PRIVATE_CHAT;
+  }
+  if (target === "config") {
+    return "задан в конфиге";
+  }
+  try {
+    const chat = (await deps.telegram.request("getChat", { chat_id: target })) as ChatInfo;
+    return `в канал ${channelName(chat)}`;
+  } catch (error) {
+    console.error(error);
+    return `в канал ${target}`;
+  }
+}
+
+async function answerQuery(query: CallbackQuery, deps: Deps, text?: string): Promise<void> {
+  await deps.telegram.call("answerCallbackQuery", text ? { callback_query_id: query.id, text } : { callback_query_id: query.id });
+}
+
+async function settle(query: CallbackQuery, result: View | "missing" | "failed", deps: Deps): Promise<void> {
+  if (result === "missing" || result === "failed") {
+    return answerQuery(query, deps, result === "missing" ? NEED_START : SAVE_FAILED);
+  }
+  await answerQuery(query, deps, SAVED);
+  await editMessage(query, result, deps);
+}
+
+async function chooseWindow(query: CallbackQuery, hours: number, deps: Deps): Promise<void> {
+  const userId = query.from.id;
+  const result = await editUser<View>(userId, deps, (data) => {
+    const updated = setWindow(data, hours);
+    const outcome = windowView(updated.data);
+    if (!updated.changed) {
+      return { outcome };
+    }
+    return { outcome, write: { data: updated.data, message: `chore(users): set window ${hours}h for ${userId} via bot` } };
+  });
+  await settle(query, result, deps);
+}
+
+async function chooseChat(query: CallbackQuery, action: ChatAction, deps: Deps): Promise<void> {
+  const userId = query.from.id;
+  if (action === "cancel") {
+    await deps.kv.delete(channelKey(userId));
+    await answerQuery(query, deps);
+    await editMessage(query, { text: CHANNEL_CANCELLED }, deps);
+    return;
+  }
+  if (action === "channel") {
+    if (!(await deps.github.userExists(userId))) {
+      return answerQuery(query, deps, NEED_START);
+    }
+    await deps.kv.put(channelKey(userId), "1", { expirationTtl: CHANNEL_TTL_SECONDS });
+    await answerQuery(query, deps);
+    await editMessage(query, { text: CHANNEL_PROMPT, reply_markup: { inline_keyboard: [[{ text: "Отмена", callback_data: "chat:cancel" }]] } }, deps);
+    return;
+  }
+  await deps.kv.delete(channelKey(userId));
+  const result = await editUser<View>(userId, deps, (data) => {
+    const updated = resetChat(data);
+    const outcome = chatView(PRIVATE_CHAT);
+    if (!updated.changed) {
+      return { outcome };
+    }
+    return { outcome, write: { data: updated.data, message: `chore(users): reset chat for ${userId} via bot` } };
+  });
+  await settle(query, result, deps);
+}
+
+async function lookup<T>(deps: Deps, method: string, body: Record<string, unknown>): Promise<T | null> {
+  try {
+    return (await deps.telegram.request(method, body)) as T;
+  } catch (error) {
+    if (String(error).includes(BAD_REQUEST)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function checkChannel(ref: number | string, userId: number, deps: Deps): Promise<ChatInfo | string> {
+  const chat = await lookup<ChatInfo>(deps, "getChat", { chat_id: ref });
+  if (typeof chat?.id !== "number") {
+    return CHANNEL_NOT_FOUND;
+  }
+  if (chat.type !== "channel") {
+    return NOT_CHANNEL;
+  }
+  const me = (await deps.telegram.request("getMe", {})) as { id: number };
+  const bot = await lookup<Member>(deps, "getChatMember", { chat_id: chat.id, user_id: me.id });
+  if (bot?.status !== "administrator" || !bot.can_post_messages) {
+    return BOT_NOT_ADMIN;
+  }
+  const member = await lookup<Member>(deps, "getChatMember", { chat_id: chat.id, user_id: userId });
+  return member?.status === "creator" || member?.status === "administrator" ? chat : NOT_CHANNEL_ADMIN;
+}
+
+async function pickChannel(userId: number, text: string, origin: ForwardOrigin | undefined, deps: Deps): Promise<void> {
+  const reply = (body: string) => deps.telegram.call("sendMessage", { chat_id: userId, text: body });
+  const ref = parseChannel(text, origin);
+  if (ref === null) {
+    return reply(NOT_CHANNEL);
+  }
+  let channel: ChatInfo | string;
+  try {
+    channel = await checkChannel(ref, userId, deps);
+  } catch (error) {
+    console.error(error);
+    return reply(CHECK_FAILED);
+  }
+  if (typeof channel === "string") {
+    return reply(channel);
+  }
+  const saved = await editUser<"saved">(userId, deps, (data) => {
+    const updated = setChat(data, channel.id);
+    if (!updated.changed) {
+      return { outcome: "saved" };
+    }
+    return { outcome: "saved", write: { data: updated.data, message: `chore(users): set chat for ${userId} via bot` } };
+  });
+  if (saved === "failed") {
+    return reply(SAVE_FAILED);
+  }
+  await deps.kv.delete(channelKey(userId));
+  await reply(saved === "missing" ? NEED_START : `Дайджест будет приходить в канал ${channelName(channel)}.`);
 }
 
 function clip(text: string): string {

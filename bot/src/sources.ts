@@ -25,7 +25,7 @@ export type Source =
 
 export interface ForwardOrigin {
   type: string;
-  chat?: { username?: string };
+  chat?: { id?: number; username?: string; title?: string };
 }
 
 export type Parsed = { source: Source } | { feedUrl: string } | { error: "unknown" | "private_forward" };

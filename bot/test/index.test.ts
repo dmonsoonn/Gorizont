@@ -7,7 +7,7 @@ const env = {
   GITHUB_TOKEN: "pat",
   GITHUB_REPO: "dmonsoonn/Gorizont",
   OWNER_ID: "612722019",
-  KV: {},
+  KV: { get: async () => null, put: async () => {}, delete: async () => {} },
 } as unknown as Env;
 
 function post(body: string, secret: string | null = "hook-secret", method = "POST", workerEnv = env) {

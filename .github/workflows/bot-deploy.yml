@@ -76,6 +76,8 @@ jobs:
           jq -n '{commands: [
               {command: "start", description: "Подключиться к Горизонту"},
               {command: "list", description: "Ваши источники"},
+              {command: "window", description: "Как часто приходит дайджест"},
+              {command: "chat", description: "Куда приходит дайджест"},
               {command: "help", description: "Список команд"}
             ]}' \
             | curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \

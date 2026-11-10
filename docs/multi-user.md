@@ -23,8 +23,8 @@ Every user has a file `data/users/<telegram_id>.json`:
 | Field | Default | Meaning |
 |---|---|---|
 | `id` | required | Telegram user ID; must match the file name. |
-| `chat_id` | `id` | Where the digest goes: the user's private chat with the bot, a channel (`@name`) or a group. The bot must be an admin of a channel to post there. |
-| `time_window_hours` | `1` | Collection window and digest frequency. Must divide 24: the user runs at UTC hours divisible by it. |
+| `chat_id` | `id` | Where the digest goes: the user's private chat with the bot, a channel (`@name` or numeric ID) or a group. The bot must be an admin of a channel to post there. Users change it with `/chat` in the [bot](telegram-bot.md#digest-settings), which writes the numeric channel ID. |
+| `time_window_hours` | `1` | Collection window and digest frequency. Must divide 24: the user runs at UTC hours divisible by it. Users choose 3, 6, 12 or 24 with `/window` in the bot. |
 | `publish_site` | `false` | Publish the digest to GitHub Pages and send email. Only the site owner should set it. |
 | `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. In the owner's file, missing source types take the model defaults; Hacker News is off unless the file sets `"hackernews": {"enabled": true}`. Other users are limited as described below. |
 
