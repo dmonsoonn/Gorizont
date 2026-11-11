@@ -67,6 +67,29 @@ describe("webhook", () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({ chat_id: 123 });
   });
 
+  it.each([
+    ["TELEGRAM_BOT_TOKEN", ""],
+    ["GITHUB_TOKEN", ""],
+    ["GITHUB_REPO", ""],
+    ["OWNER_ID", ""],
+    ["OWNER_ID", "abc"],
+    ["OWNER_ID", "NaN"],
+  ])("fails with 500 and logs %s when it is %j", async (name, value) => {
+    const fetcher = stubFetch();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await post(help, "hook-secret", "POST", { ...env, [name]: value });
+    expect(response.status).toBe(500);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(String(error.mock.calls[0][0])).toContain(name);
+  });
+
+  it("checks the secret before the config", async () => {
+    const fetcher = stubFetch();
+    const response = await post(help, "wrong", "POST", { ...env, OWNER_ID: "" });
+    expect(response.status).toBe(401);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("acknowledges the update even when Telegram fails", async () => {
     stubFetch(() => Response.json({ ok: false, description: "Forbidden: bot was blocked by the user" }));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

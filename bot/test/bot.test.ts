@@ -199,7 +199,7 @@ describe("messages", () => {
         "• GitHub: github.com/владелец/репозиторий (релизы) или github.com/пользователь (активность)",
         "• RSS: ссылка на фид или на сайт, фид найду сам",
         "",
-        "Не больше 20 источников. Список ваших источников хранится в публичном репозитории.",
+        "Не больше 20 источников. Список ваших источников видит владелец бота.",
       ].join("\n"),
     ]);
     expect(bot.github.userExists).not.toHaveBeenCalled();
@@ -464,12 +464,12 @@ describe("adding sources", () => {
     });
   });
 
-  it("explains sources and the public repository after approval", async () => {
+  it("explains sources and who sees them after approval", async () => {
     const bot = setup();
     await bot.run(text(USER, "/start"));
     await bot.run(press("approve:123"));
     expect(lastText(bot)).toContain("пришлите ссылку");
-    expect(lastText(bot)).toContain("публичном репозитории");
+    expect(lastText(bot)).toContain("видит владелец бота");
   });
 
   it("retries once on a write conflict", async () => {

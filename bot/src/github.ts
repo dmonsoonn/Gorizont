@@ -32,7 +32,7 @@ export function createGitHub(token: string, repo: string, fetcher: typeof fetch)
     Authorization: `Bearer ${token}`,
     "User-Agent": "gorizont-bot",
   };
-  const fileUrl = (id: number) => `https://api.github.com/repos/${repo}/contents/data/users/${id}.json`;
+  const fileUrl = (id: number) => `https://api.github.com/repos/${repo}/contents/users/${id}.json`;
 
   async function userExists(id: number): Promise<boolean> {
     const response = await fetcher(fileUrl(id), { headers });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGitHub } from "../src/github";
 
-const FILE_URL = "https://api.github.com/repos/dmonsoonn/Gorizont/contents/data/users/123.json";
+const FILE_URL = "https://api.github.com/repos/dmonsoonn/Gorizont/contents/users/123.json";
 
 function github(...statuses: number[]) {
   const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("{}", { status: statuses.shift() }));
