@@ -4,16 +4,57 @@ on:
   schedule:
     - cron: '0 * * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only list the users due this hour, send nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: users-digest
+  cancel-in-progress: false
 
 jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.due.outputs.matrix }}
+      publish: ${{ steps.due.outputs.publish }}
 
     steps:
+      - name: Check repository variables
+        env:
+          OWNER_ID: ${{ vars.OWNER_ID }}
+          DATA_REPO: ${{ vars.DATA_REPO }}
+        run: |
+          for name in OWNER_ID DATA_REPO; do
+            test -n "${!name}" || { echo "::error::Repository variable $name is not set"; exit 1; }
+          done
+
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Checkout instance data
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          path: instance
+          persist-credentials: false
+
+      - name: Copy user files
+        env:
+          DATA_REPO: ${{ vars.DATA_REPO }}
+        run: |
+          mkdir -p data/users
+          if [ -d instance/users ]; then
+            find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
+          else
+            echo "::warning::$DATA_REPO has no users/ directory, nobody is due"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,15 +72,17 @@ jobs:
       - name: List users due this hour
         id: due
         env:
-          HORIZON_OWNER_ID: "612722019"
-        run: echo "matrix=$(uv run python -m src.users due)" >> "$GITHUB_OUTPUT"
+          HORIZON_OWNER_ID: ${{ vars.OWNER_ID }}
+        run: |
+          matrix="$(uv run python -m src.users due)"
+          echo "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "publish=$(jq -c '[.include[] | select(.publish_site)] | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
 
   digest:
     needs: plan
-    if: ${{ fromJSON(needs.plan.outputs.matrix).include[0] != null }}
+    if: ${{ !inputs.dry_run && fromJSON(needs.plan.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     strategy:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       max-parallel: 1
@@ -48,6 +91,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Checkout instance data
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          path: instance
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,13 +113,16 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Prepare GitHub Actions config
-        run: cp data/config.github.json data/config.json
+      - name: Prepare config and user files
+        run: |
+          cp data/config.github.json data/config.json
+          mkdir -p data/users
+          find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
 
       - name: Run Horizon for user
         env:
           HORIZON_USER: ${{ matrix.user }}
-          HORIZON_OWNER_ID: "612722019"
+          HORIZON_OWNER_ID: ${{ vars.OWNER_ID }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
           GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
@@ -77,12 +131,36 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: uv run horizon --user "$HORIZON_USER"
 
-      - name: Set current date as environment variable
+      - name: Upload site
         if: ${{ matrix.publish_site }}
-        run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-${{ matrix.user }}
+          path: docs
+          retention-days: 1
+
+  publish:
+    needs: [plan, digest]
+    if: ${{ !cancelled() && !inputs.dry_run && needs.plan.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download sites
+        uses: actions/download-artifact@v8
+        with:
+          pattern: site-*
+          merge-multiple: true
+          path: docs
+
+      - name: Point the site at this repository
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          sed -i -E "s|^url: .*|url: \"https://${owner}.github.io\"|; s|^baseurl: .*|baseurl: \"/${GITHUB_REPOSITORY#*/}\"|" docs/_config.yml
+          echo "DATE=$(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
 
       - name: Deploy to GitHub Pages
-        if: ${{ matrix.publish_site }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
