@@ -2,7 +2,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -79,9 +79,7 @@ class _UserSources(_Strict):
         )
 
 
-class UserConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class UserConfig(_Strict):
     id: int = Field(gt=0)
     chat_id: Optional[Union[int, str]] = None
     time_window_hours: int = 1
@@ -179,7 +177,7 @@ def apply_overlay(base: Config, user: UserConfig) -> Config:
     return Config.model_validate(data)
 
 
-def due_users(data_dir: Path, hour: int) -> list[dict[str, Any]]:
+def due_users(data_dir: Path, hour: int) -> List[Dict[str, Any]]:
     due = []
     for path in sorted(users_dir(data_dir).glob("*.json")):
         try:
