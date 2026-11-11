@@ -73,6 +73,8 @@ KV is eventually consistent: two `/start` messages a few seconds apart may produ
 
 ## One-time setup
 
+The quickest way is `./scripts/setup.sh` in a clone of your fork, with `gh` (logged in), `jq`, `curl` and `openssl` installed. Prepare the bot token from @BotFather, a Cloudflare API token from the **Edit Cloudflare Workers** template (the account needs a `workers.dev` subdomain) and a Groq API key. The script checks every token before writing it, finds your Telegram ID, the Account ID and the Worker URL, creates the private data repository with your user file, asks you to create the PAT and refuses one that can write to this repository, sets the secrets and variables below, enables Actions and deploys the bot. The hourly digest schedule stays off unless you turn it on; when it is on, the script also runs it once with **dry_run**. Running it again asks before replacing anything already set. The steps below do the same by hand.
+
 1. **Cloudflare.** Create an account, then:
    - an API token from the **Edit Cloudflare Workers** template;
    - the Account ID (Workers & Pages overview page);
