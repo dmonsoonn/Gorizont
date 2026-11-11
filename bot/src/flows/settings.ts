@@ -24,22 +24,12 @@ import {
   windowButton,
   windowText,
 } from "../texts";
+import { isBot, isChat, isMember, shaped, unexpected, type ChatInfo, type Member } from "../telegram";
 import { CHANNEL_TTL_SECONDS, channelKey, type CallbackQuery, type Deps, type View } from "../types";
 
 const BAD_REQUEST = "Bad Request";
 
 export type ChatAction = "channel" | "private" | "cancel";
-
-interface ChatInfo {
-  id: number;
-  type: string;
-  title?: string;
-}
-
-interface Member {
-  status: string;
-  can_post_messages?: boolean;
-}
 
 async function showSetting(userId: number, deps: Deps, render: (data: UserData) => Promise<View>): Promise<void> {
   let view: View;
@@ -98,7 +88,7 @@ async function chatLabel(data: UserData, deps: Deps): Promise<string> {
     return CONFIG_CHAT;
   }
   try {
-    const chat = (await deps.telegram.request("getChat", { chat_id: target })) as ChatInfo;
+    const chat = shaped("getChat", await deps.telegram.request("getChat", { chat_id: target }), isChat);
     return inChannel(channelName(chat));
   } catch (error) {
     console.error(error);
@@ -156,9 +146,9 @@ export async function chooseChat(query: CallbackQuery, action: ChatAction, deps:
   await settle(query, result, deps);
 }
 
-async function lookup<T>(deps: Deps, method: string, body: Record<string, unknown>): Promise<T | null> {
+async function lookup(deps: Deps, method: string, body: Record<string, unknown>): Promise<unknown> {
   try {
-    return (await deps.telegram.request(method, body)) as T;
+    return await deps.telegram.request(method, body);
   } catch (error) {
     if (String(error).includes(BAD_REQUEST)) {
       return null;
@@ -167,20 +157,28 @@ async function lookup<T>(deps: Deps, method: string, body: Record<string, unknow
   }
 }
 
+async function memberOf(chatId: number, userId: number, deps: Deps): Promise<Member | null> {
+  const member = await lookup(deps, "getChatMember", { chat_id: chatId, user_id: userId });
+  return member === null ? null : shaped("getChatMember", member, isMember);
+}
+
 async function checkChannel(ref: number | string, userId: number, deps: Deps): Promise<ChatInfo | string> {
-  const chat = await lookup<ChatInfo>(deps, "getChat", { chat_id: ref });
-  if (typeof chat?.id !== "number") {
+  const chat = await lookup(deps, "getChat", { chat_id: ref });
+  if (!isChat(chat)) {
+    if (chat !== null) {
+      console.error(unexpected("getChat"));
+    }
     return CHANNEL_NOT_FOUND;
   }
   if (chat.type !== "channel") {
     return NOT_CHANNEL;
   }
-  const me = (await deps.telegram.request("getMe", {})) as { id: number };
-  const bot = await lookup<Member>(deps, "getChatMember", { chat_id: chat.id, user_id: me.id });
+  const me = shaped("getMe", await deps.telegram.request("getMe", {}), isBot);
+  const bot = await memberOf(chat.id, me.id, deps);
   if (bot?.status !== "administrator" || !bot.can_post_messages) {
     return BOT_NOT_ADMIN;
   }
-  const member = await lookup<Member>(deps, "getChatMember", { chat_id: chat.id, user_id: userId });
+  const member = await memberOf(chat.id, userId, deps);
   return member?.status === "creator" || member?.status === "administrator" ? chat : NOT_CHANNEL_ADMIN;
 }
 
