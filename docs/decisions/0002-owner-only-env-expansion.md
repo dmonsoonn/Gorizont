@@ -1,6 +1,6 @@
 # 0002. Expand `${VAR}` only in the owner's user file
 
-- Status: accepted
+- Status: accepted, owner ID source amended by 0003
 - Date: 2026-11-08
 
 ## Context
@@ -18,3 +18,6 @@ We will use option C. `load_user` expands `${VAR}` only when the file's id equal
 - The trust boundary is the workflow file: moving the owner ID into `data/` or giving the bot's PAT the `Workflows` permission would reopen #14.
 - Local runs of the owner's file need `HORIZON_OWNER_ID` in the environment.
 - Fields that read secrets or files by name rather than via `${}` (for example `sources.twitter.apify_token_env`, `cookie_dir`) are not covered by this decision and must be restricted separately before users can write arbitrary source fields.
+
+## Update (2026-11-11, ADR 0003)
+The owner ID is no longer hard-coded in `users-digest.yml`: both jobs take `HORIZON_OWNER_ID` from the repository variable `vars.OWNER_ID` (option B), so a fork needs no workflow edit. The trust boundary still holds because the bot's PAT is granted only on the separate data repository (ADR 0003): it has no access to the code repository, its workflows or its variables, so the bot cannot promote anyone to owner. Granting that PAT access to the code repository, or the `Variables` or `Workflows` permission, would reopen #14.

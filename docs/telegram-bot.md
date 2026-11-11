@@ -5,12 +5,12 @@ title: Telegram bot
 
 # Telegram bot
 
-People join Horizon through the same Telegram bot that sends the digests. A person sends `/start`, the owner approves the request with a button, and the bot commits `data/users/<id>.json` to the repository. The next run of `users-digest.yml` picks the new user up (see [Multiple users](multi-user.md)).
+People join Horizon through the same Telegram bot that sends the digests. A person sends `/start`, the owner approves the request with a button, and the bot commits `users/<id>.json` to the instance data repository (`DATA_REPO`, see [ADR 0003](decisions/0003-instance-data-repo.md)). The next run of `users-digest.yml` picks the new user up (see [Multiple users](multi-user.md)).
 
 ## How it works
 
 ```
-Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API──► data/users/<id>.json in main
+Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API──► users/<id>.json in DATA_REPO
                             │                                              │
                        Workers KV                              users-digest.yml (hourly)
             (pending / rejected requests,                      sends digests with the same bot
@@ -18,10 +18,11 @@ Telegram ──webhook──► Cloudflare Worker (bot/) ──Contents API─�
 ```
 
 - Telegram delivers every update to the Worker URL with the `X-Telegram-Bot-Api-Secret-Token` header. Requests without the right header get `401`.
-- A request from a new person goes to the owner (`OWNER_ID` in `bot/wrangler.jsonc`) with the name, `@username`, ID, profile link and **Approve / Reject** buttons. Only the owner can press them.
+- A request from a new person goes to the owner (the repository variable `OWNER_ID`, passed to the Worker on deploy) with the name, `@username`, ID, profile link and **Approve / Reject** buttons. Only the owner can press them.
 - A pending request is stored in KV for 24 hours, so repeated `/start` does not notify the owner again. A rejection is stored without expiry.
 - Approval creates `{"id": <id>, "time_window_hours": 6}` as a commit by `Gorizont bot`. An existing file is never overwritten. If GitHub fails, the owner gets an error message and can press the button again.
-- The Worker always answers Telegram with `200` after the secret check, otherwise Telegram keeps retrying the update.
+- After the secret check the Worker checks its own config: `OWNER_ID` must be a number and `GITHUB_REPO`, `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN` must be set. Otherwise it logs the missing names and answers `500`, which shows up as `last_error_message` in `getWebhookInfo`.
+- Otherwise the Worker always answers Telegram with `200`, even when handling fails, so Telegram does not keep retrying the update.
 - Commands: `/start`, `/list`, `/window`, `/chat`, `/help`. The bot ignores groups and channels.
 
 A new user has no sources, so their digest stays empty until they add some. The digest is delivered only while `users-digest.yml` is enabled.
@@ -43,7 +44,7 @@ An approved user sends a link or forwards a post; there is no separate command. 
 - The reply has an **Undo** button that removes the source with a second commit. It acts on the file of whoever presses it.
 - At most 20 sources per user, the owner included; disabled ones count. A source that is already there is reported without a commit. Input containing `${` is refused.
 - If the file changed between reading and writing, the bot reads it again and retries once.
-- The repository is public, so the bot tells users that their list of sources is public too.
+- `/help` tells users that the owner of the bot sees their list of sources.
 
 ## Managing sources
 
@@ -76,8 +77,8 @@ KV is eventually consistent: two `/start` messages a few seconds apart may produ
    - an API token from the **Edit Cloudflare Workers** template;
    - the Account ID (Workers & Pages overview page);
    - your `workers.dev` subdomain (Workers & Pages → Settings). The Worker URL is `https://gorizont-bot.<subdomain>.workers.dev`.
-2. **KV namespace.** Run `cd bot && npm ci && npx wrangler login && npx wrangler kv namespace create gorizont-bot` and put the printed `id` into the `kv_namespaces` entry of `bot/wrangler.jsonc`. The id is not a secret.
-3. **GitHub token.** Create a fine-grained personal access token with access to this repository only and the single permission **Contents: Read and write**. Do not grant **Workflows**: user files must not be able to change workflows (see ADR 0002).
+2. **Data repository.** Create a private repository for the instance data, for example `<you>/gorizont-data`, with at least one commit. It holds only `users/<telegram_id>.json`; the base config stays in this repository as `data/config.github.json`. Put your own file there, `users/<your_id>.json` with `{"id": <your_id>}`, or let the bot create it.
+3. **GitHub token.** Create a fine-grained personal access token with access to **the data repository only** and the single permission **Contents: Read and write**. Do not give it access to this repository: a leaked token must not be able to change code, workflows or variables (see ADR 0002 and ADR 0003). The digest workflow uses the same token to read the data repository.
 4. **Repository secrets** (Settings → Secrets and variables → Actions):
 
    | Secret | Value |
@@ -88,12 +89,20 @@ KV is eventually consistent: two `/start` messages a few seconds apart may produ
    | `BOT_WEBHOOK_SECRET` | any random string of 1–256 characters `A-Z a-z 0-9 _ -`, e.g. `openssl rand -hex 32` |
    | `BOT_GITHUB_TOKEN` | token from step 3 |
 
-5. **Repository variable** `BOT_URL` = the Worker URL from step 1.
+5. **Repository variables:**
+
+   | Variable | Value |
+   |---|---|
+   | `BOT_URL` | the Worker URL from step 1 |
+   | `OWNER_ID` | your Telegram user ID |
+   | `DATA_REPO` | the data repository from step 2, `owner/name` |
+
+   The KV namespace needs no setup: `wrangler deploy` creates it on the first deploy and reuses it afterwards.
 6. Push a change under `bot/` or run **Deploy Telegram Bot** manually.
 
 ## Deployment
 
-`.github/workflows/bot-deploy.yml` runs on pushes to `main` that touch `bot/**` and on manual dispatch. It installs the pinned dependencies, runs the tests and the type check, deploys with `wrangler deploy --secrets-file` (the secrets come from the repository secrets above), registers the webhook with `setWebhook` for `message` and `callback_query` updates, and sets the command menu (`/start`, `/list`, `/help`) with `setMyCommands`.
+`.github/workflows/bot-deploy.yml` runs on pushes to `main` that touch `bot/**` and on manual dispatch. It installs the pinned dependencies, runs the tests and the type check, checks that the secrets and the variables `OWNER_ID` and `DATA_REPO` are set, deploys with `wrangler deploy --secrets-file` (the secrets come from the repository secrets above) and `--var OWNER_ID:… --var GITHUB_REPO:<DATA_REPO>`, registers the webhook with `setWebhook` for `message` and `callback_query` updates, and sets the command menu (`/start`, `/list`, `/window`, `/chat`, `/help`) with `setMyCommands`.
 
 Check the webhook:
 
