@@ -435,6 +435,7 @@ def test_fresh_install_writes_everything(box, bash):
         "BOT_URL": "https://gorizont-bot.alice.workers.dev",
     }
     assert "Готово" in result.stdout
+    assert "Ничего не изменилось." not in result.stdout
 
 
 def test_fresh_install_creates_a_private_data_repo_before_asking_for_the_pat(box):
@@ -623,6 +624,7 @@ def test_rerun_keeps_everything_when_told_so(box, bash):
     assert (box.state["secrets"], box.state["vars"]) == before
     assert box.state["repos"]["alice/gorizont-data"]["files"]["users/4242.json"] == "{}"
     assert "Проверить webhook: curl" in result.stdout
+    assert "Ничего не изменилось." in result.stdout
     assert [r["workflow"] for r in box.state["runs"]] == ["bot-deploy.yml"]
     assert box.gh("workflow", "enable", "users-digest.yml") == []
 

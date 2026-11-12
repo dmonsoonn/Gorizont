@@ -338,7 +338,7 @@ step_groq() {
 }
 
 apply() {
-  local i name value
+  local i name value changed=0
   say ""
   say "== Запись в $CODE_REPO"
   i=0
@@ -352,8 +352,10 @@ apply() {
     if [ "$value" != "$(var_value "$name")" ]; then
       gh variable set "$name" -R "$CODE_REPO" --body "$value" >/dev/null
       say "Переменная $name = $value"
+      changed=$((changed + 1))
     fi
   done
+  [ $((i + changed)) -gt 0 ] || say "Ничего не изменилось."
 }
 
 enable_core_workflows() {
