@@ -1,7 +1,7 @@
 ---
 id: 010
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -110,8 +110,9 @@ reopened: false
 | AC10 | `test_digest_schedule_stays_off_by_default` (ни одного `gh workflow enable users-digest.yml`, состояние не изменилось), `test_rerun_keeps_everything_when_told_so` (то же), `test_digest_schedule_is_enabled_on_yes_and_dry_run_follows` (`active`, без `disable`) | PASS |
 | AC11 | `test_deploy_checks_the_webhook`, `test_digest_schedule_is_enabled_on_yes_and_dry_run_follows` и `test_dry_run_runs_when_the_schedule_is_already_on` (dry-run с `dry_run=true`, матрица в выводе), `test_digest_schedule_stays_off_by_default` («Пропущен», запусков нет), `test_rerun_keeps_everything_when_told_so` (без токена — команда `getWebhookInfo`), `test_failed_deploy_stops_with_the_run_link` | PASS |
 | AC12 | `git diff -U0 docs/telegram-bot.md` — добавлен один абзац в «One-time setup» (+2 строки), удалений нет | PASS |
-| AC13 | `uv run pytest` → 1126 passed (1079 + 47); тесты скрипта под `/bin/bash` 3.2.57 и bash 5.3.20; `bash -n` под обоими чисто. CI после пуша — не запускался (пуша не было) | NOT VERIFIED (CI) |
-| AC14 | Живой прогон владельцем на Gorizont не делался | NOT VERIFIED |
+| AC13 | `uv run pytest` → 1126 passed (1079 + 47); тесты скрипта под `/bin/bash` 3.2.57 и bash 5.3.20; `bash -n` под обоими чисто. CI: run 43098250522 на `caf2ca9` создан во время инцидента GitHub Actions 2026-11-11 20:48 UTC и остался без джоб (не отменяется и не перезапускается); пустой коммит `76c2b7c` → run 43186000172 success: python 1124 passed (на раннере одна версия bash, поэтому на 2 параметра меньше, чем локально), bot 7 files / 308 passed | PASS |
+| AC14 | Владелец 2026-11-12 запустил `./scripts/setup.sh` на Gorizont, на всё ответ по умолчанию («нет»/Enter). Вывод: найдены все группы секретов, `OWNER_ID [612722019]`, `dmonsoonn/gorizont-data уже есть`, `Файл владельца users/612722019.json уже есть`, раздел «Запись» пуст, Actions включены, рассылка не включена, «Бот задеплоен», напечатана команда `getWebhookInfo`, dry-run «Пропущен», «Готово». `bot-deploy.yml` run 43186635201 (`workflow_dispatch`, 08:53:14Z) success; `gh secret list` и `gh variable list` (с датами) до/после — `diff` пуст; `users-digest.yml` — `disabled_manually`; в `gorizont-data` последний коммит по-прежнему `8da8695` (2026-11-11 13:37:51Z). Webhook после деплоя: владелец отправил `/help`, бот ответил (со слов владельца) | PASS |
+| доработка | По итогам AC14: если записывать нечего, раздел «Запись» печатает «Ничего не изменилось.» (`test_rerun_keeps_everything_when_told_so` — есть, `test_fresh_install_writes_everything` — нет; первая проверка падает на версии `caf2ca9`) | PASS |
 | N1 | `test_bad_bot_token_is_asked_again` (кавычка → «недопустимые символы», неверный → «Telegram не принял»), `test_three_bad_bot_tokens_write_nothing` | PASS |
 | N2 | `test_owner_id_must_be_a_positive_integer` (`abc`, `-100123` отклонены), `test_three_bad_owner_ids_write_nothing` (с пустым) | PASS |
 | N3 | `test_rejected_service_tokens_write_no_secrets[cloudflare, no_subdomain, groq]` — ни `secret set`, ни `variable set` | PASS |
