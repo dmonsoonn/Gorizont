@@ -1,7 +1,7 @@
 ---
 id: 011
 size: M
-status: in-progress
+status: done
 reopened: false
 ---
 
@@ -81,7 +81,7 @@ reopened: false
 
 | AC | Как проверено | Результат |
 |----|---------------|-----------|
-| 1 | `git diff ba8927c -- README.md 'README_*.md' \| wc -l` → 0. `gh api …/readme` — только после пуша | NOT VERIFIED (нет пуша) |
+| 1 | после пуша `203ea7c`: `gh api repos/dmonsoonn/Gorizont/readme -q .path` → `.github/README.md`; `git diff ba8927c -- README.md 'README_*.md' \| wc -l` → 0 | PASS |
 | 2 | grep разделов и ключевых строк `.github/README.md`: все 18 на месте, `/help` есть после правки; trendshift/hellogithub/QQ/спонсоры — 0 совпадений | PASS |
 | 3 | `head -4` (front matter `layout: default`, `title: Свой Горизонт`), `grep '^## \|^### '`: 9 разделов + «Токен GitHub для бота», «Вручную» | PASS |
 | 4 | grep: `gh workflow enable users-digest.yml`, **Enable workflow**, **dry_run**, **Run workflow**, «60 дней», ссылка `disable-and-enable-workflows`; источник в Plan | PASS |
@@ -94,7 +94,7 @@ reopened: false
 | 11 | Каждое из 13 имён секретов/переменных из текста найдено в `.github/workflows/*.yml` / `scripts/setup.sh`; `Users Horizon Digest`, `Deploy Telegram Bot`, `gorizont-bot` (`bot/wrangler.jsonc`), `gorizont-data`/`workers.dev`/`sendRichMessage` (`setup.sh`), `pending:`/`rejected:` (`types.ts`), 20 источников, 24 ч, окно 6 ч, `WINDOWS = [3, 6, 12, 24]`, кнопка `✓ 6 ч` (`texts.ts:81`), пустой дайджест не отправляется (`orchestrator.py:281`), `/start` скрипт просит сам (`setup.sh:186`) | PASS |
 | 12 | `git diff --word-diff=plain docs/telegram-bot.md` → только `{+The full walkthrough … [Self-hosting](self-host.md) (in Russian).+}` | PASS |
 | 13 | `gh issue create` → https://github.com/dmonsoonn/Gorizont/issues/26 | PASS |
-| 14 | `uv run pytest` → `1126 passed in 62.41s` (после последней правки). CI `ci.yml` / `deploy-docs.yml` — после пуша | NOT VERIFIED (нет пуша) |
+| 14 | `uv run pytest` → `1126 passed in 62.41s`; CI run 43260645141 на `203ea7c`: success (python, bot). `deploy-docs.yml` в форке `disabled_manually` и не запускался | PASS (`deploy-docs.yml` неприменим: выключен в форке намеренно, решение владельца 2026-11-12) |
 | N1 | grep по `vars.OWNER_ID`, `1043052224`, `vars.DATA_REPO`, хосту `vars.BOT_URL`, `ghp_`, `github_pat_`, `gsk_`, 32-hex → 0 совпадений в обоих файлах | PASS |
 | N2 | grep `self-host.md`: «только репозиторий данных», «Contents: Read and write», «classic token», «ADR 0003», «отказывается записывать токен» | PASS |
 | N3 | мутация: дописаны `[x](missing.md)` и `[y](telegram-bot.md#no-such-section)` → `2 errors`, exit 1, обе названы; после отката → `0 errors`, exit 0 | PASS |
