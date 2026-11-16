@@ -1,6 +1,6 @@
 # 0002. Expand `${VAR}` only in the owner's user file
 
-- Status: accepted, owner ID source amended by 0003
+- Status: superseded by [0004](0004-reject-user-env-refs.md)
 - Date: 2026-11-08
 
 ## Context

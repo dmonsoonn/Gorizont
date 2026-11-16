@@ -78,14 +78,14 @@ def test_overlay_without_sources_keeps_base_sources():
     assert rss_names(config) == ["Base"]
 
 
-def test_load_user_expands_env_vars(tmp_path, monkeypatch):
+def test_load_owner_with_explicit_chat(tmp_path, monkeypatch):
     monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "@owner")
-    write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}"})
+    write_user(tmp_path, "111", {"id": 111, "chat_id": "@explicit"})
 
     config = apply_overlay(base_config(), load_user(tmp_path, "111"))
 
-    assert config.webhook.request_body["chat_id"] == "@owner"
+    assert config.webhook.request_body["chat_id"] == "@explicit"
 
 
 def test_overlay_drops_email_unless_user_publishes_site():
@@ -110,8 +110,7 @@ def test_load_user_rejects_empty_chat_id(tmp_path):
 def test_overlay_rejects_unexpanded_chat_id(tmp_path, monkeypatch):
     monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}"})
-    user = load_user(tmp_path, "111")
+    user = UserConfig(id=111, chat_id="${TELEGRAM_CHAT_ID}")
 
     with pytest.raises(ConfigError, match="TELEGRAM_CHAT_ID"):
         apply_overlay(base_config(), user)
@@ -122,7 +121,7 @@ def test_due_users_does_not_need_chat_env(tmp_path, monkeypatch):
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}", "publish_site": True})
 
-    assert due_users(tmp_path, 0) == [{"user": "111", "publish_site": True}]
+    assert due_users(tmp_path, 0) == [{"user": "111", "publish_site": False}]
 
 
 @pytest.mark.parametrize("user_id", ["abc", "../config", "0", "-1", "12/34", ""])
@@ -168,17 +167,22 @@ def test_time_window_must_divide_day(tmp_path, hours):
         load_user(tmp_path, "111")
 
 
-def test_owner_file_expands_env_vars(tmp_path, monkeypatch):
+def test_owner_file_cannot_reference_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("HORIZON_OWNER_ID", "111")
     monkeypatch.setenv("LWN_KEY", "lwn-key")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "@owner")
     sources = {"rss": [{"name": "LWN", "url": "https://lwn.example.com/feed?key=${LWN_KEY}"}]}
     write_user(tmp_path, "111", {"id": 111, "chat_id": "${TELEGRAM_CHAT_ID}", "sources": sources})
 
-    config = apply_overlay(base_config(), load_user(tmp_path, "111"))
+    with pytest.raises(ConfigError) as excinfo:
+        load_user(tmp_path, "111")
 
-    assert str(config.sources.rss[0].url) == "https://lwn.example.com/feed?key=lwn-key"
-    assert config.webhook.request_body["chat_id"] == "@owner"
+    message = str(excinfo.value)
+    assert "111.json" in message
+    assert "LWN_KEY" in message
+    assert "TELEGRAM_CHAT_ID" in message
+    assert "lwn-key" not in message
+    assert "@owner" not in message
 
 
 def test_non_owner_file_cannot_reference_secrets(tmp_path, monkeypatch):
@@ -215,7 +219,7 @@ def test_env_refs_need_owner_id(tmp_path, monkeypatch, owner_id):
     sources = {"rss": [{"name": "LWN", "url": "https://lwn.example.com/feed?key=${LWN_KEY}"}]}
     write_user(tmp_path, "111", {"id": 111, "sources": sources})
 
-    with pytest.raises(ConfigError, match="HORIZON_OWNER_ID"):
+    with pytest.raises(ConfigError, match="LWN_KEY"):
         load_user(tmp_path, "111")
 
 
@@ -236,7 +240,7 @@ def test_due_users_marks_non_owner_env_refs_broken(tmp_path, monkeypatch):
     write_user(tmp_path, "222", {"id": 222, "sources": evil_sources})
 
     assert due_users(tmp_path, 0) == [
-        {"user": "111", "publish_site": True},
+        {"user": "111", "publish_site": False},
         {"user": "222", "publish_site": False},
     ]
 

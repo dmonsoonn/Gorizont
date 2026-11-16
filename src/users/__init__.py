@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..models import Config, SourcesConfig
-from ..storage.manager import _ENV_VAR_PATTERN, ConfigError, _expand_env_vars
+from ..storage.manager import _ENV_VAR_PATTERN, ConfigError
 
 _USER_ID_PATTERN = re.compile(r"[1-9][0-9]*")
 MAX_USER_SOURCES = 20
@@ -136,8 +136,8 @@ def _reject_env_refs(data: Any, path: Path) -> Any:
     names = sorted(set(_ENV_VAR_PATTERN.findall(json.dumps(data))))
     if names:
         raise ConfigError(
-            f"{path} references {', '.join(names)}: environment variables are expanded "
-            "only in the owner's file (HORIZON_OWNER_ID)"
+            f"{path} references {', '.join(names)}: environment variable references "
+            "are not allowed in user files"
         )
     return data
 
@@ -147,11 +147,11 @@ def load_user(data_dir: Path, user_id: str) -> UserConfig:
     if not path.exists():
         raise ConfigError(f"User config not found: {path}")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = _reject_env_refs(json.loads(path.read_text(encoding="utf-8")), path)
         if int(user_id) == _owner_id():
-            data = _default_hackernews_off(_expand_env_vars(data))
+            data = _default_hackernews_off(data)
         else:
-            data = _restrict_user_sources(_reject_env_refs(data, path), path)
+            data = _restrict_user_sources(data, path)
         user = UserConfig.model_validate(data)
     except (json.JSONDecodeError, ValidationError) as exc:
         raise ConfigError(f"Invalid user config {path}\nDetails: {exc}") from exc
@@ -170,7 +170,7 @@ def apply_overlay(base: Config, user: UserConfig) -> Config:
     data["collection"]["time_window_hours"] = user.time_window_hours
     chat_id = user.id if user.chat_id is None else user.chat_id
     if isinstance(chat_id, str) and _ENV_VAR_PATTERN.search(chat_id):
-        raise ConfigError(f"chat_id {chat_id} of user {user.id} is not expanded: set the environment variable")
+        raise ConfigError(f"chat_id {chat_id} of user {user.id} references an environment variable: use an explicit chat id")
     data["webhook"]["request_body"]["chat_id"] = chat_id
     if not user.publish_site:
         data["email"] = None

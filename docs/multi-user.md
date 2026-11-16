@@ -30,7 +30,11 @@ Every user has a file `users/<telegram_id>.json` in the data repository (`data/u
 | `publish_site` | `false` | Publish the digest to GitHub Pages and send email. Only the site owner should set it. |
 | `sources` | base sources | Replaces the whole `sources` block of the base config. The base config has no sources, so a user without `sources` gets an empty digest. In the owner's file, missing source types take the model defaults; Hacker News is off unless the file sets `"hackernews": {"enabled": true}`. Other users are limited as described below. |
 
-`${VAR}` references are expanded from the environment only in the owner's file: the one whose `id` equals the `HORIZON_OWNER_ID` environment variable. Any `${VAR}` in another user's file is a validation error, so a user file cannot read secrets such as AI keys. `users-digest.yml` sets `HORIZON_OWNER_ID` from the repository variable `OWNER_ID` in both jobs; for local runs export it or add it to your dotenv file.
+`${VAR}` references are forbidden in every user file, including the owner's ([ADR 0004](decisions/0004-reject-user-env-refs.md)). A reference anywhere in the JSON, including nested keys and values, is a validation error whether or not the variable exists. Errors name the variable and file without revealing its value. Plain `$name` is unchanged. Environment expansion remains available in the base config in the code repository.
+
+To migrate an existing file, replace `chat_id: "${TELEGRAM_CHAT_ID}"` with an explicit numeric chat ID or channel name, or omit `chat_id` to deliver to the user's ID. Setting it in the base webhook does not override this rule: the user overlay replaces that field. Put sources requiring `${VAR}` in the base config and omit user `sources` to inherit them; supplying `sources` replaces the whole base block.
+
+`HORIZON_OWNER_ID` still identifies the owner for source permissions and Hacker News defaults. `users-digest.yml` sets it from the repository variable `OWNER_ID` in both jobs; for local runs export it or add it to your dotenv file. Other owner source capabilities, including fields reading secrets or files by name, are unchanged and are not protected by the interpolation ban.
 
 Every other user's `sources` may contain only these fields, at most 20 sources in total; anything else is a validation error:
 
