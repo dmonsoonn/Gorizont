@@ -24,6 +24,7 @@ export const REQUEST_PENDING = "Заявка уже на рассмотрени�
 export const REJECTED = "Владелец отклонил заявку.";
 export const APPROVED = `Доступ открыт. Дайджест будет приходить в этот чат раз в ${NEW_USER_WINDOW_HOURS} ч, когда у вас появятся источники.\n\n${HELP}`;
 export const UNKNOWN = "Не понимаю. Список команд — /help.";
+export const UPDATE_FAILED = "Что-то пошло не так, попробуйте позже";
 export const NOT_OWNER = "Решать заявки может только владелец.";
 export const BAD_CALLBACK = "Некорректная кнопка.";
 export const ALREADY_USER = "Пользователь уже подключён.";

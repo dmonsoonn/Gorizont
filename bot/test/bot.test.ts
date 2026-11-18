@@ -797,10 +797,20 @@ describe("managing sources: refusals", () => {
     expect(toasts(bot)).toEqual([toast]);
   });
 
-  it("lets other Telegram errors through", async () => {
+  it("logs unexpected edit errors and attempts to notify the user", async () => {
     const bot = withDurov();
     bot.state.editError = "message to edit not found";
-    await expect(bot.run(click(`src:${hash}`))).rejects.toThrow("message to edit not found");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await bot.run(click(`src:${hash}`));
+      expect(error).toHaveBeenCalledExactlyOnceWith(new Error("Telegram editMessageText failed: Bad Request: message to edit not found"));
+      expect(bot.calls.at(-1)).toEqual({
+        method: "answerCallbackQuery",
+        body: { callback_query_id: "cb2", text: "Что-то пошло не так, попробуйте позже" },
+      });
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it.each([

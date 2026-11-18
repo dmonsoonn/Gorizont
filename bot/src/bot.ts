@@ -2,7 +2,7 @@ import { decide, start } from "./flows/access";
 import { chooseChat, chooseWindow, pickChannel, showChat, showWindow } from "./flows/settings";
 import { addFromMessage, chooseFeed, manageSource, showList, undoSource } from "./flows/sources";
 import { answerQuery, reply } from "./replies";
-import { BAD_CALLBACK, HELP, UNKNOWN } from "./texts";
+import { BAD_CALLBACK, HELP, UNKNOWN, UPDATE_FAILED } from "./texts";
 import { channelKey, type CallbackQuery, type Deps, type Message, type Update } from "./types";
 
 export {
@@ -36,10 +36,27 @@ const ROUTES: Route[] = [
 ];
 
 export async function handleUpdate(update: Update, deps: Deps): Promise<void> {
-  if (update.message) {
-    await handleMessage(update.message, deps);
-  } else if (update.callback_query) {
-    await handleCallback(update.callback_query, deps);
+  const { message, callback_query: query } = update ?? {};
+  const callback = typeof query?.id === "string" && query.id ? query : undefined;
+  try {
+    if (message) {
+      await handleMessage(message, deps);
+    } else if (callback) {
+      await handleCallback(callback, deps);
+    }
+  } catch (error) {
+    console.error(error);
+    try {
+      if (message) {
+        if (message.chat?.type === "private" && Number.isSafeInteger(message.chat.id) && message.from) {
+          await reply(message.chat.id, UPDATE_FAILED, deps);
+        }
+      } else if (callback) {
+        await answerQuery(callback, deps, UPDATE_FAILED);
+      }
+    } catch (deliveryError) {
+      console.error(deliveryError);
+    }
   }
 }
 
