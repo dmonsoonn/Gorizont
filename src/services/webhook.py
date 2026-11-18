@@ -7,9 +7,10 @@ import logging
 import os
 import re
 from rich.console import Console
+from rich.text import Text
 from dataclasses import asdict, dataclass
 from enum import Enum
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Union, cast
 import httpx
@@ -26,6 +27,7 @@ TELEGRAM_RICH_MESSAGE_LIMIT = 32000
 TELEGRAM_RICH_BLOCK_LIMIT = 500
 TELEGRAM_SEND_INTERVAL = 3.0
 _TELEGRAM_BOT_PATH_RE = re.compile(r"/bot[^/]+")
+_TELEGRAM_TOKEN_PATH_RE = re.compile(r"/bot([0-9]+:[A-Za-z0-9_-]+)(?=/|$)")
 _TELEGRAM_EXPAND_HINT = {
     "zh": "点击条目即可展开详情。",
     "ru": "Нажмите на материал, чтобы раскрыть подробности.",
@@ -319,6 +321,36 @@ def redact_headers(headers: dict[str, str]) -> dict[str, str]:
         key: "<redacted>" if _SENSITIVE_HEADER_RE.search(key) else value
         for key, value in headers.items()
     }
+
+
+def _telegram_token_pattern(request_url: str) -> re.Pattern[str] | None:
+    tokens = _TELEGRAM_TOKEN_PATH_RE.findall(unquote(urlsplit(request_url).path))
+    if not tokens:
+        return None
+    patterns = [
+        "".join(f"(?:{re.escape(char)}|(?i:%{ord(char):02x}))" for char in token)
+        for token in sorted(tokens, key=len, reverse=True)
+    ]
+    return re.compile("|".join(patterns))
+
+
+def _telegram_error_description(
+    response: httpx.Response, token_pattern: re.Pattern[str] | None
+) -> str | None:
+    try:
+        data = response.json()
+    except (ValueError, RecursionError):
+        return None
+
+    description = data.get("description") if isinstance(data, dict) else None
+    if not isinstance(description, str):
+        return None
+
+    if token_pattern:
+        description = token_pattern.sub("<redacted>", description)
+
+    description = "".join(char if char.isprintable() else " " for char in description)
+    return description.strip()[:500].rstrip() or None
 
 
 class WebhookNotifier:
@@ -833,7 +865,7 @@ class WebhookNotifier:
                         headers=headers,
                     )
 
-            return self._handle_response_status(response, safe_url)
+            return self._handle_response_status(response, request_url)
 
         except (httpx.InvalidURL, UnsafeURLError) as e:
             self.console.print(
@@ -915,7 +947,7 @@ class WebhookNotifier:
         return None
 
     def _handle_response_status(
-        self, response: httpx.Response, safe_url: str
+        self, response: httpx.Response, request_url: str
     ) -> WebhookDeliveryResult:
         """Log and display HTTP response status by category.
 
@@ -923,8 +955,10 @@ class WebhookNotifier:
         in the JSON body (e.g. Feishu code=19001, DingTalk errcode=400,
         Slack ok=false).
         """
+        safe_url = redact_url(request_url)
         status = response.status_code
         body = response.text[:500]
+        detail = body
 
         if 200 <= status < 300:
             error_hint = self._check_body_error_code(body)
@@ -961,12 +995,21 @@ class WebhookNotifier:
                 safe_url, status, location,
             )
         elif 400 <= status < 500:
-            self.console.print(
-                f"[red]Webhook client error (status={status})[/red]"
-            )
+            description = None
+            if self.config.platform == "telegram":
+                token_pattern = _telegram_token_pattern(request_url)
+                if token_pattern:
+                    safe_url = token_pattern.sub("<redacted>", safe_url)
+                description = _telegram_error_description(response, token_pattern)
+                detail = description
+            message = f"Webhook client error (status={status})"
+            if description:
+                self.console.print(Text(f"{message}: {description}", style="red"))
+            else:
+                self.console.print(f"[red]{message}[/red]")
             logger.error(
-                "Webhook client error: URL=%s, status=%d",
-                safe_url, status,
+                "Webhook client error: URL=%s, status=%d%s",
+                safe_url, status, f": {description}" if description else "",
             )
         elif 500 <= status < 600:
             self.console.print(
@@ -985,7 +1028,7 @@ class WebhookNotifier:
         return WebhookDeliveryResult(
             WebhookDeliveryStatus.HTTP_FAILURE,
             status_code=status,
-            detail=body,
+            detail=detail,
         )
 
     async def send_daily_summary(
