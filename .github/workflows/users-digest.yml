@@ -1,121 +1,173 @@
----
 name: Users Horizon Digest
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only list the users due this hour, send nothing"
+        type: boolean
+        default: false
+
 permissions:
   contents: read
+
 concurrency:
-  group: task-016-fixture-digest
+  group: users-digest
   cancel-in-progress: false
+
 jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      matrix: "${{ steps.due.outputs.matrix }}"
-      publish: "${{ steps.due.outputs.publish }}"
+      matrix: ${{ steps.due.outputs.matrix }}
+      publish: ${{ steps.due.outputs.publish }}
+
     steps:
-    - name: Check repository variables
-      env:
-        OWNER_ID: '4242'
-        DATA_REPO: task-016-fixture
-      run: |
-        for name in OWNER_ID DATA_REPO; do
-          test -n "${!name}" || { echo "::error::Repository variable $name is not set"; exit 1; }
-        done
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Prepare isolated instance data
-      run: mkdir -p instance/users && cp .github/task-016-fixture/users/*.json instance/users/
-    - name: Copy user files
-      env:
-        DATA_REPO: task-016-fixture
-      run: |
-        mkdir -p data/users
-        if [ -d instance/users ]; then
-          find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
-        else
-          echo "::warning::$DATA_REPO has no users/ directory, nobody is due"
-        fi
-    - name: Set up Python
-      uses: actions/setup-python@v7.1.0
-      with:
-        python-version: '3.12'
-    - name: Install uv
-      uses: astral-sh/setup-uv@v10.3.3
-      with:
-        version: 0.11.26
-        prune-cache: true
-    - name: Install dependencies
-      run: uv sync
-    - name: List users due this hour
-      id: due
-      env:
-        HORIZON_OWNER_ID: '4242'
-      run: |
-        matrix="$(uv run python -m src.users due)"
-        echo "$matrix"
-        echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-        echo "publish=$(jq -c '[.include[] | select(.publish_site)] | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+      - name: Check repository variables
+        env:
+          OWNER_ID: ${{ vars.OWNER_ID }}
+          DATA_REPO: ${{ vars.DATA_REPO }}
+        run: |
+          for name in OWNER_ID DATA_REPO; do
+            test -n "${!name}" || { echo "::error::Repository variable $name is not set"; exit 1; }
+          done
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Checkout instance data
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          path: instance
+          persist-credentials: false
+
+      - name: Copy user files
+        env:
+          DATA_REPO: ${{ vars.DATA_REPO }}
+        run: |
+          mkdir -p data/users
+          if [ -d instance/users ]; then
+            find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
+          else
+            echo "::warning::$DATA_REPO has no users/ directory, nobody is due"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.11.26"
+          prune-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: List users due this hour
+        id: due
+        env:
+          HORIZON_OWNER_ID: ${{ vars.OWNER_ID }}
+        run: |
+          matrix="$(uv run python -m src.users due)"
+          echo "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "publish=$(jq -c '[.include[] | select(.publish_site)] | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+
   digest:
     needs: plan
-    if: "${{ !inputs.dry_run && fromJSON(needs.plan.outputs.matrix).include[0] !=
-      null }}"
+    if: ${{ !inputs.dry_run && fromJSON(needs.plan.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     strategy:
-      matrix: "${{ fromJSON(needs.plan.outputs.matrix) }}"
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       max-parallel: 1
       fail-fast: false
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Prepare isolated instance data
-      run: mkdir -p instance/users && cp .github/task-016-fixture/users/*.json instance/users/
-    - name: Set up Python
-      uses: actions/setup-python@v7.1.0
-      with:
-        python-version: '3.12'
-    - name: Install uv
-      uses: astral-sh/setup-uv@v10.3.3
-      with:
-        version: 0.11.26
-        prune-cache: true
-    - name: Install dependencies
-      run: uv sync
-    - name: Prepare config and user files
-      run: |
-        cp .github/task-016-fixture/config.json data/config.json
-        mkdir -p data/users
-        find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
-    - name: Run Horizon for user
-      env:
-        PYTHONPATH: ".github/task-016-fixture"
-        FIXTURE_AI_KEY: fixture
-        FIXTURE_WEBHOOK_URL: https://example.invalid/webhook
-        HORIZON_USER: "${{ matrix.user }}"
-        HORIZON_OWNER_ID: '4242'
-      run: uv run horizon --user "$HORIZON_USER"
-    - name: Verify generated fixture digest
-      run: grep -F "Task 016 fixture digest content." "data/summaries/horizon-$(date
-        -u +%F)-en.md"
-    - name: Upload site
-      if: "${{ matrix.publish_site }}"
-      uses: actions/upload-artifact@v7
-      with:
-        name: site-${{ matrix.user }}
-        path: data/summaries
-        retention-days: 1
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Checkout instance data
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          path: instance
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.11.26"
+          prune-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Prepare config and user files
+        run: |
+          cp data/config.github.json data/config.json
+          mkdir -p data/users
+          find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
+
+      - name: Run Horizon for user
+        env:
+          HORIZON_USER: ${{ matrix.user }}
+          HORIZON_OWNER_ID: ${{ vars.OWNER_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HORIZON_WEBHOOK_URL: ${{ secrets.HORIZON_WEBHOOK_URL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: uv run horizon --user "$HORIZON_USER"
+
+      - name: Upload site
+        if: ${{ matrix.publish_site }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-${{ matrix.user }}
+          path: docs
+          retention-days: 1
+
   publish:
-    needs:
-    - plan
-    - digest
-    if: "${{ !cancelled() && !inputs.dry_run && needs.plan.outputs.publish == 'true'
-      }}"
+    needs: [plan, digest]
+    if: ${{ !cancelled() && !inputs.dry_run && needs.plan.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-    - name: Confirm publication is disabled
-      run: echo "Fixture only; no GitHub Pages deployment"
-'on':
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Only list the users due this hour, send nothing
-        type: boolean
-        default: false
+      - name: Download sites
+        uses: actions/download-artifact@v8
+        with:
+          pattern: site-*
+          merge-multiple: true
+          path: docs
+
+      - name: Point the site at this repository
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          sed -i -E "s|^url: .*|url: \"https://${owner}.github.io\"|; s|^baseurl: .*|baseurl: \"/${GITHUB_REPOSITORY#*/}\"|" docs/_config.yml
+          echo "DATE=$(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          keep_files: true
+          commit_message: "📝 Daily Summary: ${{ env.DATE }}"
+          publish_branch: gh-pages
+          enable_jekyll: true

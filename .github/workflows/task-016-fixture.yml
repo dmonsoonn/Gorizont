@@ -1,0 +1,21 @@
+name: Task 016 isolated digest checks
+
+on:
+  push:
+    branches: [verify/task-016-digest]
+
+permissions:
+  contents: read
+
+jobs:
+  planner-dry-run:
+    uses: ./.github/workflows/task-016-users-fixture.yml
+    with:
+      dry_run: true
+  users-digest:
+    needs: planner-dry-run
+    uses: ./.github/workflows/task-016-users-fixture.yml
+    with:
+      dry_run: false
+  daily-summary:
+    uses: ./.github/workflows/task-016-daily-fixture.yml

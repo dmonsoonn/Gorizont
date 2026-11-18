@@ -1,0 +1,120 @@
+---
+name: Users Horizon Digest
+permissions:
+  contents: read
+concurrency:
+  group: task-016-fixture-digest
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: "${{ steps.due.outputs.matrix }}"
+      publish: "${{ steps.due.outputs.publish }}"
+    steps:
+    - name: Check repository variables
+      env:
+        OWNER_ID: '4242'
+        DATA_REPO: task-016-fixture
+      run: |
+        for name in OWNER_ID DATA_REPO; do
+          test -n "${!name}" || { echo "::error::Repository variable $name is not set"; exit 1; }
+        done
+    - name: Checkout code
+      uses: actions/checkout@v6
+    - name: Prepare isolated instance data
+      run: mkdir -p instance/users && cp .github/task-016-fixture/users/*.json instance/users/
+    - name: Copy user files
+      env:
+        DATA_REPO: task-016-fixture
+      run: |
+        mkdir -p data/users
+        if [ -d instance/users ]; then
+          find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
+        else
+          echo "::warning::$DATA_REPO has no users/ directory, nobody is due"
+        fi
+    - name: Set up Python
+      uses: actions/setup-python@v7.1.0
+      with:
+        python-version: '3.12'
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.3.3
+      with:
+        version: 0.11.26
+        prune-cache: true
+    - name: Install dependencies
+      run: uv sync
+    - name: List users due this hour
+      id: due
+      env:
+        HORIZON_OWNER_ID: '4242'
+      run: |
+        matrix="$(uv run python -m src.users due)"
+        echo "$matrix"
+        echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+        echo "publish=$(jq -c '[.include[] | select(.publish_site)] | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+  digest:
+    needs: plan
+    if: "${{ !inputs.dry_run && fromJSON(needs.plan.outputs.matrix).include[0] !=
+      null }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: "${{ fromJSON(needs.plan.outputs.matrix) }}"
+      max-parallel: 1
+      fail-fast: false
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+    - name: Prepare isolated instance data
+      run: mkdir -p instance/users && cp .github/task-016-fixture/users/*.json instance/users/
+    - name: Set up Python
+      uses: actions/setup-python@v7.1.0
+      with:
+        python-version: '3.12'
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.3.3
+      with:
+        version: 0.11.26
+        prune-cache: true
+    - name: Install dependencies
+      run: uv sync
+    - name: Prepare config and user files
+      run: |
+        cp .github/task-016-fixture/config.json data/config.json
+        mkdir -p data/users
+        find instance/users -maxdepth 1 -name '*.json' -exec cp {} data/users/ \;
+    - name: Run Horizon for user
+      env:
+        PYTHONPATH: ".github/task-016-fixture"
+        FIXTURE_AI_KEY: fixture
+        FIXTURE_WEBHOOK_URL: https://example.invalid/webhook
+        HORIZON_USER: "${{ matrix.user }}"
+        HORIZON_OWNER_ID: '4242'
+      run: uv run horizon --user "$HORIZON_USER"
+    - name: Verify generated fixture digest
+      run: grep -F "Task 016 fixture digest content." "data/summaries/horizon-$(date
+        -u +%F)-en.md"
+    - name: Upload site
+      if: "${{ matrix.publish_site }}"
+      uses: actions/upload-artifact@v7
+      with:
+        name: site-${{ matrix.user }}
+        path: data/summaries
+        retention-days: 1
+  publish:
+    needs:
+    - plan
+    - digest
+    if: "${{ !cancelled() && !inputs.dry_run && needs.plan.outputs.publish == 'true'
+      }}"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Confirm publication is disabled
+      run: echo "Fixture only; no GitHub Pages deployment"
+'on':
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
