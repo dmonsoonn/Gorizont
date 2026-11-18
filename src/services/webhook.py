@@ -23,6 +23,7 @@ from ..url_security import UnsafeURLError, safe_request, validate_http_url
 logger = logging.getLogger(__name__)
 
 TELEGRAM_RICH_MESSAGE_LIMIT = 32000
+TELEGRAM_RICH_BLOCK_LIMIT = 500
 TELEGRAM_SEND_INTERVAL = 3.0
 _TELEGRAM_BOT_PATH_RE = re.compile(r"/bot[^/]+")
 _TELEGRAM_EXPAND_HINT = {
@@ -35,6 +36,14 @@ _TELEGRAM_PART_LABEL = {
     "ru": "Часть {part} из {total}",
     "en": "Part {part}/{total}",
 }
+_TELEGRAM_CONTINUED_LABEL = {"zh": "续", "ru": "продолжение", "en": "continued"}
+_TELEGRAM_INLINE_RE = re.compile(
+    r"\[(?:\\.|[^\]\\\n])*\]\([^\s()]*\)"
+    r"|\*\*(?:\\.|[^*\n]|\*(?!\*))*\*\*"
+    r"|`(?:\\.|[^`\n])*`"
+    r"|&(?:\#\d+|\#x[0-9a-fA-F]+|[a-zA-Z]+);|\\.|.",
+    re.DOTALL,
+)
 
 
 class WebhookDeliveryStatus(str, Enum):
@@ -164,11 +173,52 @@ def _format_markdown_for_webhook(value: str) -> str:
     return clean_app_summary_markdown(value)
 
 
-def _telegram_details(title: str, content: str) -> str:
+def _telegram_details(title: str, content: str, *, preserve_whitespace: bool = False) -> str:
+    if not preserve_whitespace:
+        content = content.strip()
     return (
         f"<details><summary>{html.escape(title, quote=False)}</summary>\n\n"
-        f"{content.strip()}\n\n</details>"
+        f"{content}\n\n</details>"
     )
+
+
+def _telegram_block_budget(value: str) -> int:
+    return 3 * sum(bool(line.strip()) for line in value.splitlines())
+
+
+def _telegram_fits(value: str) -> bool:
+    return (
+        len(value) <= TELEGRAM_RICH_MESSAGE_LIMIT
+        and _telegram_block_budget(value) <= TELEGRAM_RICH_BLOCK_LIMIT
+    )
+
+
+def _telegram_take_content(content: str, envelope: str) -> tuple[str, str]:
+    chars_left = TELEGRAM_RICH_MESSAGE_LIMIT - len(envelope)
+    lines_left = (TELEGRAM_RICH_BLOCK_LIMIT - _telegram_block_budget(envelope)) // 3 - 1
+    end = 0
+    for match in _TELEGRAM_INLINE_RE.finditer(content):
+        token = match.group()
+        if len(token) > chars_left or token.count("\n") > lines_left:
+            if not end:
+                for delimiter in ("**", "`"):
+                    if token.startswith(delimiter) and token.endswith(delimiter):
+                        inner = token[len(delimiter):-len(delimiter)]
+                        fragment, remaining = _telegram_take_content(
+                            inner, envelope + delimiter * 2
+                        )
+                        tail = delimiter + remaining + delimiter if remaining else ""
+                        return (
+                            delimiter + fragment + delimiter,
+                            tail + content[match.end():],
+                        )
+            break
+        chars_left -= len(token)
+        lines_left -= token.count("\n")
+        end = match.end()
+    if not end:
+        raise ValueError("Telegram rich message cannot fit an indivisible text fragment")
+    return content[:end], content[end:]
 
 
 def _prepare_variables_for_body(
@@ -504,45 +554,77 @@ class WebhookNotifier:
                 + labels["empty_body"]
             ]
 
-        parts = [
+        overview = (
             header
             + f"> {labels['selected_items'].format(total=all_items_count, selected=len(important_items))}\n\n"
             + _TELEGRAM_EXPAND_HINT.get(lang, _TELEGRAM_EXPAND_HINT["en"])
-        ]
-        part_group = None
+        )
+        entries = []
         for group in summarizer.build_view(important_items, lang).groups:
             for view_item in group.items:
                 score_suffix = (
                     f" ⭐️ {view_item.score}/10" if view_item.score != "?" else ""
                 )
-                block = _telegram_details(
-                    f"{view_item.index}. {view_item.title}{score_suffix}",
-                    clean_app_summary_markdown(
-                        summarizer.generate_detail_item(
-                            view_item.item,
-                            language=lang,
-                            index=view_item.index,
-                            title=view_item.title,
-                            score=view_item.score,
-                        )
-                    ),
+                entries.append(
+                    (
+                        group.profile_id,
+                        group.name,
+                        f"{view_item.index}. {view_item.title}{score_suffix}",
+                        clean_app_summary_markdown(
+                            summarizer.generate_detail_item(
+                                view_item.item,
+                                language=lang,
+                                index=view_item.index,
+                                title=view_item.title,
+                                score=view_item.score,
+                            )
+                        ),
+                    )
                 )
-                with_heading = f"## {group.name}\n\n{block}"
-                addition = block if part_group == group.profile_id else with_heading
-                if len(parts[-1]) + len(addition) + 2 > TELEGRAM_RICH_MESSAGE_LIMIT:
-                    parts.append(with_heading)
-                else:
-                    parts[-1] += f"\n\n{addition}"
-                part_group = group.profile_id
-
-        if len(parts) == 1:
-            return parts
         part_label = _TELEGRAM_PART_LABEL.get(lang, _TELEGRAM_PART_LABEL["en"])
-        return [parts[0]] + [
-            f"**{labels['header']} - {date}** · "
-            f"{part_label.format(part=number, total=len(parts))}\n\n{part}"
-            for number, part in enumerate(parts[1:], start=2)
-        ]
+        continued = _TELEGRAM_CONTINUED_LABEL.get(lang, _TELEGRAM_CONTINUED_LABEL["en"])
+
+        def prefix(number: int, total: int) -> str:
+            return (
+                f"**{labels['header']} - {date}** · "
+                f"{part_label.format(part=number, total=total)}\n\n"
+            )
+
+        total = 1
+        while True:
+            parts = [overview]
+            part_group = None
+            for profile_id, name, title, content in entries:
+                heading = f"## {name}\n\n"
+                block = _telegram_details(title, content)
+                addition = block if part_group == profile_id else heading + block
+                candidate = parts[-1] + "\n\n" + addition
+                if _telegram_fits(candidate):
+                    parts[-1] = candidate
+                    part_group = profile_id
+                    continue
+                start = prefix(len(parts) + 1, total) + heading
+                if _telegram_fits(start + block):
+                    parts.append(start + block)
+                else:
+                    remaining = content
+                    fragment_title = title
+                    if not remaining:
+                        raise ValueError("Telegram rich message cannot fit an item heading")
+                    while remaining:
+                        start = prefix(len(parts) + 1, total) + heading
+                        envelope = start + _telegram_details(fragment_title, "")
+                        fragment, remaining = _telegram_take_content(remaining, envelope)
+                        parts.append(
+                            start + _telegram_details(
+                                fragment_title, fragment, preserve_whitespace=True
+                            )
+                        )
+                        fragment_title = f"{title} ({continued})"
+                part_group = profile_id
+            if len(parts) == total:
+                return parts
+            total = len(parts)
 
     def build_preview(self, variables: dict) -> dict[str, Any]:
         """Build the fully rendered request for dry-run preview."""

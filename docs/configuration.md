@@ -976,7 +976,9 @@ Use `@channel_username` for a public channel, or the numeric `-100...` chat ID f
 }
 ```
 
-With `platform: "telegram"`, Horizon sends the digest as a [rich message](https://core.telegram.org/bots/api/rich-messages): an overview followed by profile sections, with each item collapsed into an expandable block that holds its full summary and links. `delivery` and `layout` are ignored. A digest longer than the rich message limit is split between items into numbered parts, sent 3 seconds apart to stay within Telegram's per-chat rate limit. Log output masks the bot token in the URL.
+With `platform: "telegram"`, Horizon sends the digest as a [rich message](https://core.telegram.org/bots/api/rich-messages): an overview followed by profile sections, with each item collapsed into an expandable block that holds its full summary and links. `delivery` and `layout` are ignored. Digests are split into numbered parts within a 32000-character Markdown budget and Telegram's 500-block limit, including nested blocks and part headings. Block budgeting is conservative for the generated digest format, so a part may split earlier than Telegram strictly requires. Items are kept together when possible; an oversized item is split into expandable continuations preserving its text and links. Parts are sent 3 seconds apart to stay within Telegram's per-chat rate limit. Log output masks the bot token in the URL.
+
+Long bold text and inline code are closed and reopened across continuations. If an indivisible link or item heading cannot fit in a part on its own, message construction raises an error before sending any part of that digest. Such a fragment must be shortened at its source; it is never silently truncated or sent over the limit.
 
 ### DingTalk
 

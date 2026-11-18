@@ -1922,7 +1922,7 @@ class TestTelegramPlatform:
         messages = self._messages(items)
 
         assert len(messages) > 1
-        assert all(len(message["summary"]) <= 1300 for message in messages)
+        assert all(len(message["summary"]) <= 1200 for message in messages)
         assert all(
             message["summary"].count("<details>") == message["summary"].count("</details>")
             for message in messages
@@ -1948,7 +1948,7 @@ class TestTelegramPlatform:
             sleeps.append(seconds)
 
         monkeypatch.setattr("src.services.webhook.asyncio.sleep", fake_sleep)
-        monkeypatch.setattr("src.services.webhook.TELEGRAM_RICH_MESSAGE_LIMIT", 1)
+        monkeypatch.setattr("src.services.webhook.TELEGRAM_RICH_MESSAGE_LIMIT", 300)
         notifier = self._notifier()
 
         with patch.object(notifier, "notify", new_callable=AsyncMock) as mock_notify:
