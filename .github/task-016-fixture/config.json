@@ -1,0 +1,6 @@
+{
+  "ai": {"provider": "openai", "model": "fixture", "base_url": "https://example.invalid/v1", "api_key_env": "FIXTURE_AI_KEY", "languages": ["en"]},
+  "processing": {"profiles_dir": "profiles", "default_profile": "tech-news", "profile_settings": {"tech-news": {"topic_dedup": false}}},
+  "sources": {"hackernews": {"enabled": false}, "rss": [{"name": "Task 016 fixture", "url": "https://example.invalid/feed", "profile": "tech-news"}]},
+  "webhook": {"enabled": true, "url_env": "FIXTURE_WEBHOOK_URL", "request_body": {"chat_id": 4242, "text": "#{summary}"}}
+}
